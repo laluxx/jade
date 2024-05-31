@@ -1,22 +1,19 @@
-use stdio
-use stdlib
-use GLFW.glfw3    
+use raylib
+use GLFW.glfw3
 
 fn sub(x:i32, y:i32) -> i32 {
     return x - y;
 }
 
 fn main() {
+    let x:i32 = 10;
     add(10, 5);
     sub(3, -1); // ANOTHER
-    println!("Hello!");
     // Comment
+    println!("Hello!");        
 }
-
 
 fn add(x:i32, y:i32) -> i32 {
     return x + y;
 }
-
-
 

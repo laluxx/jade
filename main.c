@@ -1,27 +1,30 @@
-// TODO a flag to generate the .c files for inspection (by default generate an ELF)
-// TODO a flag to choose the C compiler
-// TODO a flag to choose the indentation
-// TODO defer capabilities
+// TODO automatic linking and compiling 
+// TODO FLAG to generate the .c files for inspection (by default generate an ELF)
+// TODO FLAG to choose the C compiler
+// TODO FLAG to choose the indentation
+// TODO When automatically including libraries NOTE it 
 // TODO automatic return when there is no ";"
 // TODO jade stdlib and macros like println!
 // TODO The main function should automatically take arguments
-// TODO Tooling "jade init name"
 // TODO Variable to define the number of newlines after the includes
-// TODO Ability to define include
 // TODO Type inference
+// TODO defer capabilities 
 // TODO http use statement
-// TODO LATER LLVM optimizations
+// TODO LATER LLVM C level optimizations
 // TODO LATER comment unused includes linting the genrated c code
 // TODO LATER treat arrays as lists using HEAD and TAIL or car and cdr
 // TODO SYNTAX pattern matching
 // TODO STNTAX double x = x*2
+// TODO TOOLING "jade init name" 
+// FIXME Why does let add one newline between functions?
+// TODO Keep trck of the indentation fo the scope
 
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define MAX_LINE_LENGTH 256 // TODO Dynamic memory allocation (If needed)
+#define MAX_LINE_LENGTH 256 // TODO Dynamic memory allocation (if needed)
 
 size_t indentation = 4; // TODO "-i"
 size_t function_spacing = 1; // TODO "-fs"
@@ -117,6 +120,8 @@ void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *in
     }
 }
 
+
+
 void transpile(const char* input_filename, const char* output_filename) {
     FILE *input_file = fopen(input_filename, "r");
     FILE *output_file = fopen(output_filename, "w");
@@ -195,7 +200,7 @@ void transpile(const char* input_filename, const char* output_filename) {
 
     while (fgets(line, sizeof(line), input_file)) {
         // Skip the commented "use" lines
-        if (strstr(line, "// use ")) {
+        if (strstr(line, "use ")) {
             continue;
         }
 
@@ -298,34 +303,68 @@ void transpile(const char* input_filename, const char* output_filename) {
             continue;
         }
 
-        // Copy comments directly
-        if (strstr(line, "//")) {
-            // Remove leading whitespace from the line before adding our indentation
-            char* trimmed_line = line;
-            while (*trimmed_line == ' ' || *trimmed_line == '\t') {
-                trimmed_line++;
+        // Transpile variable declarations
+        char* trimmed_line = line;
+        while (*trimmed_line == ' ' || *trimmed_line == '\t') {
+            trimmed_line++;
+        }
+        if (strstr(trimmed_line, "let ")) {
+            char var_name[MAX_LINE_LENGTH];
+            char var_type[MAX_LINE_LENGTH];
+            char var_value[MAX_LINE_LENGTH] = "";
+
+            // Parse variable declaration
+            if (strstr(trimmed_line, "=")) {
+                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, var_value);
+            } else {
+                sscanf(trimmed_line, "let %[^:]:%s", var_name, var_type);
             }
-            print_indentation(output_file, indentation);
+
+            // Remove any trailing semicolon from the original code
+            char* end_ptr = var_value + strlen(var_value) - 1;
+            if (*end_ptr == ';') {
+                *end_ptr = '\0';
+            }
+
+            // Translate the variable declaration
+            if (strstr(var_type, "i32")) {
+                if (in_function) {
+                    print_indentation(output_file, trimmed_line - line);
+                }
+                if (strlen(var_value) > 0) {
+                    fprintf(output_file, "int %s = %s;\n", var_name, var_value);
+                } else {
+                    fprintf(output_file, "int %s;\n", var_name);
+                }
+            }
+            continue;
+        }
+
+        // Copy comments directly
+        if (strstr(trimmed_line, "//")) {
+            if (in_function) {
+                print_indentation(output_file, trimmed_line - line);
+            }
             fprintf(output_file, "%s", trimmed_line);
             continue;
         }
 
         // Copy function body lines if inside any function
         if (in_function) {
-            // Remove leading whitespace from the line before adding our indentation
-            char* trimmed_line = line;
-            while (*trimmed_line == ' ' || *trimmed_line == '\t') {
-                trimmed_line++;
-            }
-
-            print_indentation(output_file, indentation);
+            print_indentation(output_file, trimmed_line - line);
             fprintf(output_file, "%s", trimmed_line);
+        } else {
+            // Copy lines outside of any function without indentation
+            fprintf(output_file, "%s", line);
         }
     }
 
     fclose(input_file);
     fclose(output_file);
 }
+
+
+
 
 char* replace_extension(const char* filename, const char* new_extension) {
     char *new_filename = malloc(strlen(filename) + strlen(new_extension) + 1);
@@ -355,4 +394,5 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+
 
