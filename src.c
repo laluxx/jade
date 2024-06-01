@@ -12,7 +12,12 @@ int sub(int x, int  y) {
 
 
 int main() {
-    int x = 10;
+    int x = 1;
+    
+    if (x > 3) {
+        printf("Porcodio\n");
+    }
+    
     add(10, 5);
     sub(3, -1); // ANOTHER
     // Comment
