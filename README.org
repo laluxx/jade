@@ -1,0 +1,47 @@
+#+TITLE: TODO's
+
+#+BEGIN_SRC rust
+
+    let width = 1920.0; // float
+    let height = 1080; // int
+    let string = "stering"; // String
+
+
+
+    let iarr:i32 [10] -> {1,1,1,1,1,1}; // denoted array of 10 ints // NOTE {0} by default
+    let farr [3] -> {1.0, 1.1, 1.2}; // inferred as float
+    let carr [2] -> {"dio", "cane"}; // inferred as chars
+
+    struct Vec2i { // NOTE will be a simple struct
+        x:i32;
+        y:i32;
+    }    let farr [3] -> {1.0, 1.1, 1.2}; // inferred as float
+    let carr [2] -> {"dio", "cane"}; // inferred as chars
+    #define PORCODIO = 10;
+
+
+  fn double x = x*2
+
+  asm { // NOTE asm src block in emacs jade-mode
+      mov %1, %0;
+      add $1, %0;
+      =r (dst);
+      r (src);
+  }
+
+  asm ("mov %1, %0\n\t"
+       "add $1, %0"
+       : "=r" (dst)
+       : "r" (src));
+
+
+
+
+
+
+
+
+
+
+#+END_SRC
+* 

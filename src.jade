@@ -1,21 +1,44 @@
 use raylib
 use GLFW.glfw3
 
-fn sub(x:i32, y:i32) -> i32 {
+fn sub(x:f32, y:i32) -> i32 {
     return x - y;
 }
 
-fn main() {
+fn voidFunction() {
+
+}
+
+let x:f32 = 29;
+
+#define PORCODIO 10;
+
+
+type Vec3i {
+    x:f32;
+    y:f32;
+    z:i32;
+    b:Vec3i; // FIXME TODO Recursive type
+}
+
+fn main() -> i32 {
     let x:i32 = 10;
+    let y = 10;
     
     if x > 3 {
         printf("Hello World\n");
+    }
+
+    loop { // TODO it should be a while 1 not wile true so that it doesnt depend on stdbool.h
+        println!("diocan");
+        break;
     }
     
     add(10, 5);
     sub(3, -1); // ANOTHER
     // Comment
-    println!("Hello!");        
+    println!("Hello!");
+    return 0;
 }
 
 fn add(x:i32, y:i32) -> i32 {
