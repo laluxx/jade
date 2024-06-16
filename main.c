@@ -13,14 +13,12 @@
 // TODO LATER comment unused includes linting the genrated c code
 // TODO LATER treat arrays as lists using HEAD and TAIL or car and cdr
 // TODO LATER automatic .h file creation
+// TODO LATER STNTAX double x = x*2
 // TODO SYNTAX pattern matching
-// TODO STNTAX double x = x*2
-// TODO TOOLING "jade init name"
 // FIXME Why does let add one newline between functions?
 // TODO Keep trck of the indentation of the scope
 // NEXT while AFTER if
 // TODO IMPORTANT FIX if
-// TODO IMPORTANT Type inference 
 // TODO IMPORTANT Emacs jade-mode
 // TODO support inline asm
 // TODO Languege package manager it will install system headers first support pacman
@@ -28,7 +26,8 @@
 // TODO IDEA builting hotreloding
 // TODO IMPORTANT Automatic lib linking based on the use statements
 // TODO NEXT fix closing curly brace of the while
-
+// TODO Functions that take 0 parameters should be callabale like this myarr.len without the paren
+// TODO if the main() function is not present treat everything as inside the main function
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -47,21 +46,21 @@ void print_indentation(FILE *output_file, size_t level) {
 
 //TODO IMPORTANT Automatically include stdint.h if needed 
 const char* map_type(const char* custom_type) {
-    if (strcmp(custom_type, "i8")    == 0) return "int8_t";
-    if (strcmp(custom_type, "u8")    == 0) return "uint8_t";
-    if (strcmp(custom_type, "i16")   == 0) return "int16_t";
-    if (strcmp(custom_type, "u16")   == 0) return "uint16_t";
-    if (strcmp(custom_type, "i32")   == 0) return "int";
-    if (strcmp(custom_type, "u32")   == 0) return "uint32_t";
-    if (strcmp(custom_type, "i64")   == 0) return "int64_t";
-    if (strcmp(custom_type, "u64")   == 0) return "uint64_t";
-    if (strcmp(custom_type, "i128")  == 0) return "int128_t";
-    if (strcmp(custom_type, "u128")  == 0) return "uint128_t";
-    if (strcmp(custom_type, "f32")   == 0) return "float";
-    if (strcmp(custom_type, "f64")   == 0) return "double";
-    if (strcmp(custom_type, "int")   == 0) return "int";
+    if (strcmp(custom_type, "i8"   ) == 0) return "int8_t";
+    if (strcmp(custom_type, "u8"   ) == 0) return "uint8_t";
+    if (strcmp(custom_type, "i16"  ) == 0) return "int16_t";
+    if (strcmp(custom_type, "u16"  ) == 0) return "uint16_t";
+    if (strcmp(custom_type, "i32"  ) == 0) return "int";
+    if (strcmp(custom_type, "u32"  ) == 0) return "uint32_t";
+    if (strcmp(custom_type, "i64"  ) == 0) return "int64_t";
+    if (strcmp(custom_type, "u64"  ) == 0) return "uint64_t";
+    if (strcmp(custom_type, "i128" ) == 0) return "int128_t";
+    if (strcmp(custom_type, "u128" ) == 0) return "uint128_t";
+    if (strcmp(custom_type, "f32"  ) == 0) return "float";
+    if (strcmp(custom_type, "f64"  ) == 0) return "double";
+    if (strcmp(custom_type, "int"  ) == 0) return "int";
     if (strcmp(custom_type, "float") == 0) return "float";
-    if (strcmp(custom_type, "char")  == 0) return "char";
+    if (strcmp(custom_type, "char" ) == 0) return "char";
     return custom_type; // _->
 }
 
@@ -159,7 +158,7 @@ void handle_loop(FILE *output_file, int indentation_level) {
     }
 
     // Write the while (true) statement
-    fprintf(output_file, "while (true) {\n");
+    fprintf(output_file, "while (1) {\n");
 }
 
 
@@ -205,6 +204,34 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     fprintf(output_file, "} %s;\n\n", type_name);
 }
 
+const char *infer_type_from_value(const char *value) {
+  // STRING
+  if (strchr(value, '\"')) {
+    return "char*";
+  }
+  // CHAR
+  if (strchr(value, '\'')) {
+    return "char";
+  }
+
+  // FLOAT
+  if (strchr(value, '.')) {
+    return "float";
+  }
+
+  // INT
+  char *endptr;
+  strtol(value, &endptr, 10);
+  while (*endptr == ' ')
+    endptr++; // Skip trailing whitespace
+
+  if (*endptr == '\0' || *endptr == ';') {
+    return "int";
+  }
+
+  // _->
+  return "ERROR";
+}
 
 
 void transpile(const char* input_filename, const char* output_filename) {
@@ -404,45 +431,47 @@ void transpile(const char* input_filename, const char* output_filename) {
 
 
         // Transpile variable declarations
-        char* trimmed_line = line;
+        char *trimmed_line = line;
         while (*trimmed_line == ' ' || *trimmed_line == '\t') {
-            trimmed_line++;
+          trimmed_line++;
         }
         if (strstr(trimmed_line, "let ")) {
-            char var_name[MAX_LINE_LENGTH];
-            char var_type[MAX_LINE_LENGTH];
-            char var_value[MAX_LINE_LENGTH] = "";
+          char var_name[MAX_LINE_LENGTH];
+          char var_type[MAX_LINE_LENGTH] =
+              ""; // Initialize empty in case type is inferred
+          char var_value[MAX_LINE_LENGTH] = "";
 
-            // Parse variable declaration
-            if (strstr(trimmed_line, "=")) {
-                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, var_value);
-            } else {
-                sscanf(trimmed_line, "let %[^:]:%s", var_name, var_type);
-            }
+          // Check if an explicit type is provided
+          if (strstr(trimmed_line, ":")) {
+            sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type,
+                   var_value);
+          } else {
+            sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
+            strcpy(var_type, infer_type_from_value(
+                                 var_value)); // Infer the type from the value
+          }
 
-            // Remove any trailing semicolon from the original code
-            char* end_ptr = var_value + strlen(var_value) - 1;
-            if (*end_ptr == ';') {
-                *end_ptr = '\0';
-            }
+          // Remove any trailing semicolon from the original code
+          char *end_ptr = var_value + strlen(var_value) - 1;
+          if (*end_ptr == ';') {
+            *end_ptr = '\0';
+          }
 
-            // Translate the variable declaration
-            const char* c_type = map_type(var_type);
-            if (in_function) {
-                print_indentation(output_file, trimmed_line - line);
-            }
-            if (strlen(var_value) > 0) {
-                fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
-            } else {
-                fprintf(output_file, "%s %s;\n", c_type, var_name);
-            }
-            continue;
+          // Map custom types or use inferred types
+          const char *c_type = strlen(var_type) > 0
+                                   ? map_type(var_type)
+                                   : infer_type_from_value(var_value);
+
+          if (in_function) {
+            print_indentation(output_file, trimmed_line - line);
+          }
+          if (strlen(var_value) > 0) {
+            fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
+          } else {
+            fprintf(output_file, "%s %s;\n", c_type, var_name);
+          }
+          continue;
         }
-
-
-
-
-
 
 
 
@@ -533,8 +562,6 @@ void transpile(const char* input_filename, const char* output_filename) {
 }
 
 
-
-
 char* replace_extension(const char* filename, const char* new_extension) {
     char *new_filename = malloc(strlen(filename) + strlen(new_extension) + 1);
     strcpy(new_filename, filename);
@@ -546,21 +573,50 @@ char* replace_extension(const char* filename, const char* new_extension) {
     return new_filename;
 }
 
-int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <input_file.jade>\n", argv[0]);
-        return 1;
-    }
+#include <sys/stat.h>
 
+void jadeInit(const char *project_name) {
+  char path[256];
+  mkdir(project_name, 0777); // Create directory with read/write/execute for all
+
+  // Create and write main.jade
+  sprintf(path, "%s/main.jade", project_name);
+  FILE *file = fopen(path, "w");
+  if (file != NULL) {
+    fprintf(file, "fn main() -> int {\n    return 0;\n}\n");
+    fclose(file);
+  }
+
+  // Create and write build.jade
+  sprintf(path, "%s/build.jade", project_name);
+  file = fopen(path, "w");
+  if (file != NULL) {
+    fprintf(file, "// Build script for the project\n");
+    fclose(file);
+  }
+}
+
+int main(int argc, char *argv[]) {
+  if (argc < 2) {
+    fprintf(stderr, "Usage: %s <command> [<args>]\n", argv[0]);
+    return 1;
+  }
+
+  if (strcmp(argv[1], "init") == 0) {
+    if (argc != 3) {
+      fprintf(stderr, "Usage: %s init <project_name>\n", argv[0]);
+      return 1;
+    }
+    jadeInit(argv[2]);
+    printf("Project %s initialized.\n", argv[2]);
+  } else {
     char *input_filename = argv[1];
     char *output_filename = replace_extension(input_filename, ".c");
-
     transpile(input_filename, output_filename);
-
     printf("Transpiled %s to %s\n", input_filename, output_filename);
-
     free(output_filename);
+  }
 
-    return 0;
+  return 0;
 }
 

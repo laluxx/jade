@@ -1,7 +1,7 @@
 use raylib
 use GLFW.glfw3
 
-fn sub(x:f32, y:i32) -> i32 {
+fn sub(x:i32, y:i32) -> i32 {
     return x - y;
 }
 
@@ -13,24 +13,27 @@ let x:f32 = 29;
 
 #define PORCODIO 10;
 
-
 type Vec3i {
     x:f32;
     y:f32;
     z:i32;
-    b:Vec3i; // FIXME TODO Recursive type
 }
 
+let a = 29;
+let b = 29.0;
+let s = "text";
+let c = 'a';
+
 fn main() -> i32 {
+    let variable:i32 = sub(2, 2); // NOTE This works somehow
     let x:i32 = 10;
-    let y = 10;
     
     if x > 3 {
         printf("Hello World\n");
     }
 
-    loop { // TODO it should be a while 1 not wile true so that it doesnt depend on stdbool.h
-        println!("diocan");
+    loop {
+        println!("something");
         break;
     }
     

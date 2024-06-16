@@ -2,12 +2,12 @@
 #include <GLFW/glfw3.h>
 #include <stdio.h>
 
-int sub(float x, int  y);
+int sub(int x, int  y);
 void voidFunction();
 int add(int x, int  y);
 
 
-int sub(float x, int  y) {
+int sub(int x, int  y) {
     return x - y;
 }
 
@@ -20,27 +20,29 @@ float x = 29;
 
 #define PORCODIO 10;
 
-
 typedef struct {
     float x;
     float y;
     int z;
-    ERROR b;
 } Vec3i;
 
 
+int a = 29;
+float b = 29.0;
+char* s = "text";
+char c = 'a';
+
 
 int main() {
+    int variable = sub(2, 2); // NOTE This works somehow;
     int x = 10;
-    int y = 10;
-;
     
     if (x > 3) {
         printf("Hello World\n");
     }
 
-    while (true) {
-        printf("diocan\n");
+    while (1) {
+        printf("something\n");
         break;
     }
     
