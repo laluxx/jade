@@ -11,7 +11,7 @@ fn voidFunction() {
 
 let x:f32 = 29;
 
-#define PORCODIO 10;
+#define COMPTIME 10;
 
 type Vec3i {
     x:f32;
@@ -27,17 +27,19 @@ let c = 'a';
 fn main() -> i32 {
     let variable:i32 = sub(2, 2); // NOTE This works somehow
     let x:i32 = 10;
+    defer x = 0;
     
     if x > 3 {
         printf("Hello World\n");
     }
 
+
     loop {
         println!("something");
         break;
     }
+
     
-    add(10, 5);
     sub(3, -1); // ANOTHER
     // Comment
     println!("Hello!");

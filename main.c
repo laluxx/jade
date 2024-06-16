@@ -38,11 +38,62 @@
 size_t indentation = 4; // TODO "-i"
 size_t function_spacing = 1; // TODO "-fs"
 
+int in_function = 0;
+int in_main_function = 0;
+int is_first_function = 1;
+int scope_level = 0;
+
 void print_indentation(FILE *output_file, size_t level) {
-    for (size_t i = 0; i < level; i++) {
-        fprintf(output_file, " ");
-    }
+  for (size_t i = 0; i < level; i++) {
+    fprintf(output_file, " ");
+  }
 }
+
+
+#define MAX_DEFERS 100
+
+typedef struct {
+  char statements[MAX_DEFERS][MAX_LINE_LENGTH];
+  int count;
+} DeferStack;
+
+DeferStack deferStacks[MAX_DEFERS];
+
+
+void push_defer_statement(const char *line) {
+  const char *statement_start = line;
+  while (*statement_start == ' ' || *statement_start == '\t') {
+    statement_start++;
+  }
+
+  // Now find the start of the action part after "defer "
+  const char *action_start = strstr(statement_start, "defer ");
+  if (action_start) {action_start += 6; // Skip past the length of "defer "
+
+    if (deferStacks[scope_level].count < MAX_DEFERS) {
+      strncpy(
+          deferStacks[scope_level].statements[deferStacks[scope_level].count],
+          action_start, MAX_LINE_LENGTH - 1);
+      deferStacks[scope_level]
+          .statements[deferStacks[scope_level].count][MAX_LINE_LENGTH - 1] =
+          '\0';
+      deferStacks[scope_level].count++;
+    }
+  }
+}
+
+void pop_and_execute_defers(FILE *output_file, int level) {
+  int i;
+  // NOTE When there are multiple defers in a single block, they are executed in  reverse order.
+  for (i = deferStacks[level].count - 1; i >= 0; i--) {
+    print_indentation(output_file, level * indentation);
+    char *statement = deferStacks[level].statements[i];
+    int len = strlen(statement);
+    fprintf(output_file, "%s", statement);
+  }
+  deferStacks[level].count = 0; // Clear the stack for the current scope level
+}
+
 
 //TODO IMPORTANT Automatically include stdint.h if needed 
 const char* map_type(const char* custom_type) {
@@ -152,12 +203,10 @@ void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *in
 }
 
 void handle_loop(FILE *output_file, int indentation_level) {
-    // Print the indentation
     for (int i = 0; i < indentation_level; i++) {
         fprintf(output_file, " ");
     }
 
-    // Write the while (true) statement
     fprintf(output_file, "while (1) {\n");
 }
 
@@ -248,16 +297,17 @@ void transpile(const char* input_filename, const char* output_filename) {
         exit(1);
     }
 
-    char prototypes[100][MAX_LINE_LENGTH]; // Assuming a maximum of 100 prototypes
-    int prototype_count = 0;
-    int uses_stdio = 0; // Flag to track usage of printf
 
     // Gather includes
     char includes[100][MAX_LINE_LENGTH]; // Assuming a maximum of 100 includes
     int include_count = 0;
+    int uses_stdio = 0; // Flag to track usage of printf
     gather_includes(input_file, includes, &include_count, &uses_stdio);
 
     // Gather prototypes
+    char prototypes[100] [MAX_LINE_LENGTH]; // Assuming a maximum of 100 prototypes
+    int prototype_count = 0;
+
     gather_prototypes(input_file, prototypes, &prototype_count);
 
     // Check for usage of printf (println!) that is not commented out
@@ -306,15 +356,22 @@ void transpile(const char* input_filename, const char* output_filename) {
 
     // Transpile the actual code
     fseek(input_file, 0, SEEK_SET);
-    int in_function = 0;
-    int in_main_function = 0;
-    int is_first_function = 1;
-    int scope_level = 0;
+    /* int in_function = 0; */
+    /* int in_main_function = 0; */
+    /* int is_first_function = 1; */
+    /* int scope_level = 0; */
 
     while (fgets(line, sizeof(line), input_file)) {
         // Skip the commented "use" lines
         if (strstr(line, "use ")) {
             continue;
+        }
+
+        if (strstr(line, "defer ")) {
+          // Capture the action following the 'defer' keyword
+          char *action = strchr(line, ' ') + 1;
+          push_defer_statement(action);
+          continue; // Skip writing the defer line to the output
         }
 
         // Handle type definitions
@@ -382,6 +439,7 @@ void transpile(const char* input_filename, const char* output_filename) {
 
         /* Check for end of function or scope */
         if (in_function && strstr(line, "}")) {
+            pop_and_execute_defers(output_file, scope_level);
             scope_level--;
             if (scope_level == 0) { // End of function
                 fprintf(output_file, "}\n");
@@ -433,44 +491,44 @@ void transpile(const char* input_filename, const char* output_filename) {
         // Transpile variable declarations
         char *trimmed_line = line;
         while (*trimmed_line == ' ' || *trimmed_line == '\t') {
-          trimmed_line++;
+            trimmed_line++;
         }
         if (strstr(trimmed_line, "let ")) {
-          char var_name[MAX_LINE_LENGTH];
-          char var_type[MAX_LINE_LENGTH] =
-              ""; // Initialize empty in case type is inferred
-          char var_value[MAX_LINE_LENGTH] = "";
+            char var_name[MAX_LINE_LENGTH];
+            char var_type[MAX_LINE_LENGTH] =
+                ""; // Initialize empty in case type is inferred
+            char var_value[MAX_LINE_LENGTH] = "";
 
-          // Check if an explicit type is provided
-          if (strstr(trimmed_line, ":")) {
-            sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type,
-                   var_value);
-          } else {
-            sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
-            strcpy(var_type, infer_type_from_value(
-                                 var_value)); // Infer the type from the value
-          }
+            // Check if an explicit type is provided
+            if (strstr(trimmed_line, ":")) {
+                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type,
+                       var_value);
+            } else {
+                sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
+                strcpy(var_type, infer_type_from_value(
+                                                       var_value)); // Infer the type from the value
+            }
 
-          // Remove any trailing semicolon from the original code
-          char *end_ptr = var_value + strlen(var_value) - 1;
-          if (*end_ptr == ';') {
-            *end_ptr = '\0';
-          }
+            // Remove any trailing semicolon from the original code
+            char *end_ptr = var_value + strlen(var_value) - 1;
+            if (*end_ptr == ';') {
+                *end_ptr = '\0';
+            }
 
-          // Map custom types or use inferred types
-          const char *c_type = strlen(var_type) > 0
-                                   ? map_type(var_type)
-                                   : infer_type_from_value(var_value);
+            // Map custom types or use inferred types
+            const char *c_type = strlen(var_type) > 0
+                ? map_type(var_type)
+                : infer_type_from_value(var_value);
 
-          if (in_function) {
-            print_indentation(output_file, trimmed_line - line);
-          }
-          if (strlen(var_value) > 0) {
-            fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
-          } else {
-            fprintf(output_file, "%s %s;\n", c_type, var_name);
-          }
-          continue;
+            if (in_function) {
+                print_indentation(output_file, trimmed_line - line);
+            }
+            if (strlen(var_value) > 0) {
+                fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
+            } else {
+                fprintf(output_file, "%s %s;\n", c_type, var_name);
+            }
+            continue;
         }
 
 

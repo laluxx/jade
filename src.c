@@ -18,7 +18,7 @@ void voidFunction() {
 
 float x = 29;
 
-#define PORCODIO 10;
+#define COMPTIME 10;
 
 typedef struct {
     float x;
@@ -41,16 +41,18 @@ int main() {
         printf("Hello World\n");
     }
 
+
     while (1) {
         printf("something\n");
         break;
     }
+
     
-    add(10, 5);
     sub(3, -1); // ANOTHER
     // Comment
     printf("Hello!\n");
     return 0;
+    x = 0;
 }
 
 

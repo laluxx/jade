@@ -18,9 +18,9 @@
 
   let x:list [10]
 
-  match x {
+      match x {
 
-  }
+      }
 
   defer x += 2;
 
@@ -49,8 +49,24 @@
 
 
 
+  // OLD
+  
+  /* void push_defer_statement(const char *statement) { */
+  /*     // Skip past "defer " to capture only the action part of the statement. */
+  /*     const char *actual_statement = statement + strlen("defer "); */
+  /*     if (deferStacks[scope_level].count < MAX_DEFERS) { */
+  /*         strcpy(deferStacks[scope_level].statements[deferStacks[scope_level].count++], */
+  /*                actual_statement); */
+  /*     } */
+  /* } */
 
-
+  /* void pop_and_execute_defers(FILE *output_file, int level) { */
+  /*     for (int i = 0; i < deferStacks[level].count; ++i) { */
+  /*         print_indentation(output_file, level); */
+  /*         fprintf(output_file, "%s\n", deferStacks[level].statements[i]); */
+  /*     } */
+  /*     deferStacks[level].count = 0; // Reset defer count after executing */
+  /* } */
 
 
 
