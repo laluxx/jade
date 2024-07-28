@@ -1,28 +1,60 @@
 #+TITLE: TODO's
 
+TODO ability to convert c to jade and jade to c,
+when converting from c to jade remember the initial c input and compile to exactly that
+* New Feature
 #+BEGIN_SRC rust
-  impl Vec3i {
-      fn reset(self) {   // NOTE Each function in an implementation will be translated as name_name
-          self.x = 0.0f; // so we can have more than one function with the same name
-          self.y = 0.0f;
-          self.z = 0.0f;
-      }
-      fn reset_and_one(self) {
-          self.reset();
-          self.x = 1.0f;
-          self.y = 1.0f;
-          self.z = 1.0f;
+  // NOTE Each function in an implementation will be translated as name_name
+  // e.g. "Camera_add"
+  // so we can have more than one function with the same name
 
+  type Camera {
+      int x;
+      int y;
+  };
+
+  impl Camera {
+      fn add(int x) {
+          self.x += x;
       }
   }
 
-  let x:list [10]
+  fn main() -> int {
+      Camera camera;
+      camera.add(10);
+      Camera.add(&camera, 10);
+      return 0;
+  }
 
-      match x {
 
+  // PATTERN MATCHING
+  rec fn last_char_in_string(string:str) -> char {
+      match string {
+          [] -> error!("empty string");
+          [x] -> x;
+          [_::xs] -> last_char_in_string(xs);
       }
+  }
 
-  defer x += 2;
+  rec fn last_in_array(array:[i32]) -> i32 {
+      match array {
+          [] -> error!("empty array");
+          [x] -> x;
+          [_::xs] -> last_in_array(xs);
+      }
+  }
+
+  //                               maybe α
+  //                                 ^
+  rec fn last_in_list(list:(i32)) -> !i32 {
+      match list {
+          [] -> NONE;
+          [x] -> x;
+          [_::xs] -> last_in_list(xs);
+      }
+  }
+
+
 
   let iarr:i32 [10] -> {1,1,1,1,1,1}; // denoted array of 10 ints // NOTE {0} by default
   let farr [3] -> {1.0, 1.1, 1.2}; // inferred as floats
@@ -33,44 +65,75 @@
       y:i32;
   }
 
-  fn double x = x*2
 
-      asm { // NOTE asm src block in emacs jade-mode
-          mov %1, %0;
-          add $1, %0;
-          =r (dst);
-          r (src);
-      }
+
+  asm { // NOTE asm src block in emacs jade-mode
+      mov %1, %0;
+      add $1, %0;
+      =r (dst);
+      r (src);
+  }
 
   asm ("mov %1, %0\n\t"
        "add $1, %0"
        : "=r" (dst)
        : "r" (src));
 
+  #+END_SRC
 
+* Bugs
+NOTE This version is more correct than the one currently used
+since it passes only the actual value of the variable to infer_type_from_value()
+for example "29" instead of "29;  // comment" but in this version comments are lost.
+#+begin_src C
+        // Transpile variable declarations
+        char *trimmed_line = line;
+        while (*trimmed_line == ' ' || *trimmed_line == '\t') {
+            trimmed_line++;
+        }
+        if (strstr(trimmed_line, "let ")) {
+            char var_name[MAX_LINE_LENGTH];
+            char var_type[MAX_LINE_LENGTH] = ""; // Initialize empty in case type is inferred
+            char var_value[MAX_LINE_LENGTH] = "";
 
-  // OLD
-  
-  /* void push_defer_statement(const char *statement) { */
-  /*     // Skip past "defer " to capture only the action part of the statement. */
-  /*     const char *actual_statement = statement + strlen("defer "); */
-  /*     if (deferStacks[scope_level].count < MAX_DEFERS) { */
-  /*         strcpy(deferStacks[scope_level].statements[deferStacks[scope_level].count++], */
-  /*                actual_statement); */
-  /*     } */
-  /* } */
+            // Check if an explicit type is provided
+            if (strstr(trimmed_line, ":")) {
+                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, var_value);
+            } else {
+                sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
+            }
 
-  /* void pop_and_execute_defers(FILE *output_file, int level) { */
-  /*     for (int i = 0; i < deferStacks[level].count; ++i) { */
-  /*         print_indentation(output_file, level); */
-  /*         fprintf(output_file, "%s\n", deferStacks[level].statements[i]); */
-  /*     } */
-  /*     deferStacks[level].count = 0; // Reset defer count after executing */
-  /* } */
+            // Remove any trailing semicolon and comments from the original code
+            char *semicolon_pos = strchr(var_value, ';');
+            if (semicolon_pos) {
+                *semicolon_pos = '\0';
+            }
 
+            // Trim trailing whitespace from the value
+            char *end_ptr = var_value + strlen(var_value) - 1;
+            while (end_ptr > var_value && (*end_ptr == ' ' || *end_ptr == '\t')) {
+                *end_ptr = '\0';
+                end_ptr--;
+            }
 
+            // Infer the type if not explicitly provided
+            if (strlen(var_type) == 0) {
+                strcpy(var_type, infer_type_from_value(var_value)); // Infer the type from the value
+            }
 
+            // Map custom types or use inferred types
+            const char *c_type = strlen(var_type) > 0
+                ? map_type(var_type)
+                : infer_type_from_value(var_value);
 
-
-#+END_SRC
-* 
+            if (in_function) {
+                print_indentation(output_file, trimmed_line - line);
+            }
+            if (strlen(var_value) > 0) {
+                fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
+            } else {
+                fprintf(output_file, "%s %s;\n", c_type, var_name);
+            }
+            continue;
+        }
+#+end_src>

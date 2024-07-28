@@ -1,9 +1,8 @@
 // TODO automatic linking and compiling
 // TODO FLAG to generate the .c files for inspection (by default generate an ELF)
 // TODO FLAG to choose the C compiler
-// TODO FLAG to choose the indentation
 // TODO When automatically including libraries NOTE it
-// TODO automatic return when there is no ";"
+// TODO automatic return when there is no ";" 
 // TODO jade stdlib and macros like println!
 // TODO The main function should automatically take arguments
 // TODO Variable to define the number of newlines after the includes
@@ -16,18 +15,16 @@
 // TODO LATER STNTAX double x = x*2
 // TODO SYNTAX pattern matching
 // FIXME Why does let add one newline between functions?
-// TODO Keep trck of the indentation of the scope
-// NEXT while AFTER if
 // TODO IMPORTANT FIX if
 // TODO IMPORTANT Emacs jade-mode
 // TODO support inline asm
-// TODO Languege package manager it will install system headers first support pacman
 // TODO jade jit REPL && client for emacs
-// TODO IDEA builting hotreloding
+// TODO builtin hotreloding
 // TODO IMPORTANT Automatic lib linking based on the use statements
 // TODO NEXT fix closing curly brace of the while
 // TODO Functions that take 0 parameters should be callabale like this myarr.len without the paren
 // TODO if the main() function is not present treat everything as inside the main function
+// TODO IMPORTANT for each line if its commented just copy it and go to the next
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -96,23 +93,25 @@ void pop_and_execute_defers(FILE *output_file, int level) {
 
 
 //TODO IMPORTANT Automatically include stdint.h if needed 
-const char* map_type(const char* custom_type) {
-    if (strcmp(custom_type, "i8"   ) == 0) return "int8_t";
-    if (strcmp(custom_type, "u8"   ) == 0) return "uint8_t";
-    if (strcmp(custom_type, "i16"  ) == 0) return "int16_t";
-    if (strcmp(custom_type, "u16"  ) == 0) return "uint16_t";
-    if (strcmp(custom_type, "i32"  ) == 0) return "int";
-    if (strcmp(custom_type, "u32"  ) == 0) return "uint32_t";
-    if (strcmp(custom_type, "i64"  ) == 0) return "int64_t";
-    if (strcmp(custom_type, "u64"  ) == 0) return "uint64_t";
-    if (strcmp(custom_type, "i128" ) == 0) return "int128_t";
-    if (strcmp(custom_type, "u128" ) == 0) return "uint128_t";
-    if (strcmp(custom_type, "f32"  ) == 0) return "float";
-    if (strcmp(custom_type, "f64"  ) == 0) return "double";
-    if (strcmp(custom_type, "int"  ) == 0) return "int";
-    if (strcmp(custom_type, "float") == 0) return "float";
-    if (strcmp(custom_type, "char" ) == 0) return "char";
-    return custom_type; // _->
+const char* map_type(const char* input_type) {
+    if (strcmp(input_type, "i8"    ) == 0) return "int8_t";
+    if (strcmp(input_type, "u8"    ) == 0) return "uint8_t";
+    if (strcmp(input_type, "i16"   ) == 0) return "int16_t";
+    if (strcmp(input_type, "u16"   ) == 0) return "uint16_t";
+    if (strcmp(input_type, "i32"   ) == 0) return "int";
+    if (strcmp(input_type, "u32"   ) == 0) return "uint32_t";
+    if (strcmp(input_type, "i64"   ) == 0) return "int64_t";
+    if (strcmp(input_type, "u64"   ) == 0) return "uint64_t";
+    if (strcmp(input_type, "i128"  ) == 0) return "int128_t";
+    if (strcmp(input_type, "u128"  ) == 0) return "uint128_t";
+    if (strcmp(input_type, "f32"   ) == 0) return "float";
+    if (strcmp(input_type, "f64"   ) == 0) return "double";
+    if (strcmp(input_type, "int"   ) == 0) return "int";
+    if (strcmp(input_type, "float" ) == 0) return "float";
+    if (strcmp(input_type, "char"  ) == 0) return "char";
+    if (strcmp(input_type, "str"   ) == 0) return "char*";
+    if (strcmp(input_type, "bool"  ) == 0) return "bool";
+    return input_type; // _->
 }
 
 void gather_prototypes(FILE *input_file, char prototypes[][MAX_LINE_LENGTH], int *prototype_count) {
@@ -158,7 +157,7 @@ void gather_prototypes(FILE *input_file, char prototypes[][MAX_LINE_LENGTH], int
                 }
             }
 
-            // Exclude main function from prototypes
+            // NOTE Exclude main function from prototypes
             if (strcmp(function_name, "main") != 0) {
                 // Store the prototype
                 snprintf(prototypes[*prototype_count], MAX_LINE_LENGTH, "%s %s(%s);", return_type, function_name, translated_params);
@@ -253,6 +252,7 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     fprintf(output_file, "} %s;\n\n", type_name);
 }
 
+
 const char *infer_type_from_value(const char *value) {
   // STRING
   if (strchr(value, '\"')) {
@@ -262,12 +262,10 @@ const char *infer_type_from_value(const char *value) {
   if (strchr(value, '\'')) {
     return "char";
   }
-
   // FLOAT
   if (strchr(value, '.')) {
     return "float";
   }
-
   // INT
   char *endptr;
   strtol(value, &endptr, 10);
@@ -276,6 +274,16 @@ const char *infer_type_from_value(const char *value) {
 
   if (*endptr == '\0' || *endptr == ';') {
     return "int";
+  }
+
+  /* // BOOL NOTE this is the correct way to do it*/ 
+  /* if (strcmp(value, "true") == 0 || strcmp(value, "false") == 0) { */
+  /*   return "bool"; */
+  /* } */
+
+  // BOOL NOTE we check bool last so we can write false or true in a comment
+  if (strstr(value, "true") || strstr(value, "false")) {
+    return "bool";
   }
 
   // _->
@@ -495,18 +503,15 @@ void transpile(const char* input_filename, const char* output_filename) {
         }
         if (strstr(trimmed_line, "let ")) {
             char var_name[MAX_LINE_LENGTH];
-            char var_type[MAX_LINE_LENGTH] =
-                ""; // Initialize empty in case type is inferred
+            char var_type[MAX_LINE_LENGTH]  = ""; // Initialize empty in case type is inferred
             char var_value[MAX_LINE_LENGTH] = "";
 
             // Check if an explicit type is provided
             if (strstr(trimmed_line, ":")) {
-                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type,
-                       var_value);
+                sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, var_value);
             } else {
                 sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
-                strcpy(var_type, infer_type_from_value(
-                                                       var_value)); // Infer the type from the value
+                strcpy(var_type, infer_type_from_value(var_value)); // Infer the type from the value
             }
 
             // Remove any trailing semicolon from the original code
@@ -531,8 +536,7 @@ void transpile(const char* input_filename, const char* output_filename) {
             continue;
         }
 
-
-
+        
         // Transpile if statements
         if (strstr(trimmed_line, "if ")) {
             int is_commented = strstr(line, "//") != NULL;
