@@ -8,6 +8,8 @@ when converting from c to jade remember the initial c input and compile to exact
   // e.g. "Camera_add"
   // so we can have more than one function with the same name
 
+  // TODO Implicit return like Rust
+
   type Camera {
       int x;
       int y;

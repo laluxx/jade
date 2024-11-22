@@ -24,10 +24,21 @@ char* st = "ciao";
 
 #define COMPTIME 10;
 
+
+
+
 typedef struct {
     int x;
     int y;
 } Point;
+
+
+typedef struct Value {
+    bool b;
+    Value v;
+} Value;
+
+
 
 
 int a = 29;

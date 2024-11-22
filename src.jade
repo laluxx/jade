@@ -17,10 +17,20 @@ let st:str = "ciao";
 
 #define COMPTIME 10;
 
+
+
+
 type Point {
-    x:i32;
-    y:i32;
+    x:i32
+    y:i32
 };
+
+rec type Value {
+    b:bool
+    v:Value
+}
+
+
 
 let a = 29;
 let b = 29.0;

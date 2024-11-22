@@ -213,9 +213,15 @@ void handle_loop(FILE *output_file, int indentation_level) {
 void handleType(FILE *input_file, FILE *output_file, const char *line) {
     char type_name[MAX_LINE_LENGTH];
     char fields[MAX_LINE_LENGTH * 10]; // Assuming a maximum of 10 lines of fields for simplicity
+    int is_recursive = 0;
 
-    // Parse the type name
-    sscanf(line, "type %s {", type_name);
+    // Check if it's a recursive type
+    if (strstr(line, "rec type ")) {
+        is_recursive = 1;
+        sscanf(line, "rec type %s {", type_name);
+    } else {
+        sscanf(line, "type %s {", type_name);
+    }
 
     // Initialize fields
     fields[0] = '\0';
@@ -232,7 +238,11 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     }
 
     // Print the typedef struct
-    fprintf(output_file, "typedef struct {\n");
+    if (is_recursive) {
+        fprintf(output_file, "typedef struct %s {\n", type_name);
+    } else {
+        fprintf(output_file, "typedef struct {\n");
+    }
 
     // Print fields with indentation
     char field_name[MAX_LINE_LENGTH];
@@ -251,7 +261,6 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     // Close the struct
     fprintf(output_file, "} %s;\n\n", type_name);
 }
-
 
 const char *infer_type_from_value(const char *value) {
   // STRING
