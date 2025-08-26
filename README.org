@@ -2,7 +2,8 @@
 
 TODO ability to convert c to jade and jade to c,
 when converting from c to jade remember the initial c input and compile to exactly that
-* New Feature
+
+* Features to implement
 #+BEGIN_SRC rust
   // NOTE Each function in an implementation will be translated as name_name
   // e.g. "Camera_add"
@@ -21,7 +22,7 @@ when converting from c to jade remember the initial c input and compile to exact
       }
   }
 
-  fn main() -> int {
+  fn main() -> i32 {
       Camera camera;
       camera.add(10);
       Camera.add(&camera, 10);
@@ -38,7 +39,7 @@ when converting from c to jade remember the initial c input and compile to exact
       }
   }
 
-  rec fn last_in_array(array:[i32]) -> i32 {
+  rec fn last_in_array(array:[]i32) -> i32 {
       match array {
           [] -> error!("empty array");
           [x] -> x;
@@ -48,19 +49,20 @@ when converting from c to jade remember the initial c input and compile to exact
 
   //                               maybe α
   //                                 ^
-  rec fn last_in_list(list:(i32)) -> !i32 {
+  rec fn last_in_list(list:()i32) -> !i32 {
       match list {
-          [] -> NONE;
-          [x] -> x;
-          [_::xs] -> last_in_list(xs);
+          () -> NONE;
+          (x) -> x;
+          (_::xs) -> last_in_list(xs);
       }
   }
 
 
 
-  let iarr:i32 [10] -> {1,1,1,1,1,1}; // denoted array of 10 ints // NOTE {0} by default
-  let farr [3] -> {1.0, 1.1, 1.2}; // inferred as floats
-  let carr [2] -> {"two", "strings"}; // inferred as strings
+  let iarr:[10]i32 = {1,1,1,1,1,1}; // denoted array of 10 ints // NOTE {0} by default
+  let farr:[_] = {1.0, 1.1, 1.2}; // inferred as 3 floats
+  let farr:[] = {1.0, 1.1, 1.2}; // inferred as floats but not 3 there could be as many as we want
+  let carr:[2] = {"two", "strings"}; // inferred as strings
 
   struct Vec2i { // NOTE will be a simple struct
       x:i32;
