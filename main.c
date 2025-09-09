@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define MAX_LINE_LENGTH 8192 // TODO Dynamic memory allocation
 
@@ -82,6 +83,16 @@ void pop_and_execute_defers(FILE *output_file, int level) {
     }
     deferStacks[level].count = 0; // Clear the stack for the current scope level
 }
+
+// Pop and execute all defers from the current scope down to level 1 (function body).
+void pop_all_defers(FILE *output_file) {
+    // Run defers from inner to outer (LIFO across scopes)
+    for (int lvl = scope_level; lvl >= 1; --lvl) {
+        pop_and_execute_defers(output_file, lvl);
+    }
+}
+
+
 
 const char* map_type(const char* input_type);
 
@@ -762,6 +773,315 @@ const char *infer_type_from_value(const char *value) {
 }
 
 
+char* parse_operand(char* start);
+int is_operator_start(char* ptr);
+
+char* parse_complete_expression(char* start);
+
+char* find_condition_end(char* start) {
+    char* ptr = start;
+    int paren_depth = 0;
+    int in_quotes = 0;
+    
+    // If condition starts with parentheses, handle it specially
+    if (*ptr == '(') {
+        ptr++;
+        paren_depth = 1;
+        
+        while (*ptr && paren_depth > 0) {
+            if (*ptr == '"' && (ptr == start + 1 || *(ptr-1) != '\\')) {
+                in_quotes = !in_quotes;
+            } else if (!in_quotes) {
+                if (*ptr == '(') {
+                    paren_depth++;
+                } else if (*ptr == ')') {
+                    paren_depth--;
+                }
+            }
+            ptr++;
+        }
+        // ptr now points after the closing parenthesis
+        return ptr;
+    }
+    
+    // For non-parenthesized conditions, parse complete expressions
+    // We'll parse one complete expression and stop
+    ptr = parse_complete_expression(start);
+    return ptr;
+}
+
+
+int is_two_char_operator(char* ptr);
+
+char* parse_complete_expression(char* start) {
+    char* ptr = start;
+    
+    // Parse the first operand
+    
+    ptr = parse_operand(ptr);
+    
+    // Skip whitespace
+    while (*ptr == ' ' || *ptr == '\t') {
+        ptr++;
+    }
+   
+    // Parse operators and subsequent operands
+    while (*ptr && is_operator_start(ptr)) {
+        // Skip the operator
+        if (is_two_char_operator(ptr)) {
+            ptr += 2;
+        } else {
+            ptr++;
+        }
+
+        // Skip whitespace after operator
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+        
+        // Parse the next operand
+        ptr = parse_operand(ptr);
+        
+        // Skip whitespace
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+    }
+    
+    return ptr;
+}
+
+int is_two_char_operator(char* ptr) {
+    if (!ptr[1]) return 0;
+    
+    return (
+        (ptr[0] == '=' && ptr[1] == '=') ||  // ==
+        (ptr[0] == '!' && ptr[1] == '=') ||  // !=
+        (ptr[0] == '<' && ptr[1] == '=') ||  // <=
+        (ptr[0] == '>' && ptr[1] == '=') ||  // >=
+        (ptr[0] == '&' && ptr[1] == '&') ||  // &&
+        (ptr[0] == '|' && ptr[1] == '|') ||  // ||
+        (ptr[0] == '+' && ptr[1] == '+') ||  // ++
+        (ptr[0] == '-' && ptr[1] == '-') ||  // --
+        (ptr[0] == '+' && ptr[1] == '=') ||  // +=
+        (ptr[0] == '-' && ptr[1] == '=') ||  // -=
+        (ptr[0] == '*' && ptr[1] == '=') ||  // *=
+        (ptr[0] == '/' && ptr[1] == '=') ||  // /=
+        (ptr[0] == '%' && ptr[1] == '=') ||  // %=
+        (ptr[0] == '&' && ptr[1] == '=') ||  // &=
+        (ptr[0] == '|' && ptr[1] == '=') ||  // |=
+        (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
+        (ptr[0] == '<' && ptr[1] == '<') ||  // <<
+        (ptr[0] == '>' && ptr[1] == '>') ||  // >>
+        (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') || // <<= (handle as special case)
+        (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')    // >>= (handle as special case)
+    );
+}
+
+
+
+// Helper function to parse an operand (variable, number, function call, etc.)
+char* parse_operand(char* start) {
+    char* ptr = start;
+    
+    // Skip leading whitespace
+    while (*ptr == ' ' || *ptr == '\t') {
+        ptr++;
+    }
+    
+    if (!*ptr) return ptr;
+    
+    // Handle unary operators (!, ++, --, +, -, ~)
+    if (*ptr == '!' || *ptr == '~' || *ptr == '+' || *ptr == '-') {
+        // Check for ++ and --
+        if ((*ptr == '+' && ptr[1] == '+') || (*ptr == '-' && ptr[1] == '-')) {
+            ptr += 2;
+        } else {
+            ptr++;
+        }
+        // Skip whitespace after unary operator
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+    }
+    
+    // Handle numbers (including hex, octal, floats)
+    if (isdigit(*ptr) || (*ptr == '0' && (ptr[1] == 'x' || ptr[1] == 'X'))) {
+        if (*ptr == '0' && (ptr[1] == 'x' || ptr[1] == 'X')) {
+            // Hexadecimal
+            ptr += 2;
+            while (isxdigit(*ptr)) {
+                ptr++;
+            }
+        } else {
+            // Decimal or octal
+            while (isdigit(*ptr) || *ptr == '.') {
+                ptr++;
+            }
+            // Handle scientific notation
+            if (*ptr == 'e' || *ptr == 'E') {
+                ptr++;
+                if (*ptr == '+' || *ptr == '-') ptr++;
+                while (isdigit(*ptr)) {
+                    ptr++;
+                }
+            }
+        }
+        // Handle suffixes (L, U, F, etc.)
+        while (*ptr == 'L' || *ptr == 'l' || *ptr == 'U' || *ptr == 'u' || *ptr == 'F' || *ptr == 'f') {
+            ptr++;
+        }
+        return ptr;
+    }
+    
+    // Handle character literals
+    if (*ptr == '\'') {
+        ptr++;
+        if (*ptr == '\\') ptr++; // Handle escape sequences
+        if (*ptr) ptr++; // The character
+        if (*ptr == '\'') ptr++; // Closing quote
+        return ptr;
+    }
+    
+    // Handle string literals
+    if (*ptr == '"') {
+        ptr++;
+        while (*ptr && *ptr != '"') {
+            if (*ptr == '\\') ptr++; // Skip escape sequences
+            if (*ptr) ptr++;
+        }
+        if (*ptr == '"') ptr++; // Closing quote
+        return ptr;
+    }
+    
+    // Handle identifiers (variables, function names)
+    if (isalpha(*ptr) || *ptr == '_') {
+        while (isalnum(*ptr) || *ptr == '_') {
+            ptr++;
+        }
+        
+        // Skip whitespace
+        while (*ptr == ' ' || *ptr == '\t') {
+            ptr++;
+        }
+        
+        // Check if it's a function call
+        if (*ptr == '(') {
+            ptr++; // Skip '('
+            int func_paren_depth = 1;
+            int in_quotes = 0;
+            
+            while (*ptr && func_paren_depth > 0) {
+                if (*ptr == '"' && (ptr == start || *(ptr-1) != '\\')) {
+                    in_quotes = !in_quotes;
+                } else if (*ptr == '\'' && (ptr == start || *(ptr-1) != '\\')) {
+                    in_quotes = !in_quotes;
+                } else if (!in_quotes) {
+                    if (*ptr == '(') {
+                        func_paren_depth++;
+                    } else if (*ptr == ')') {
+                        func_paren_depth--;
+                    }
+                }
+                ptr++;
+            }
+        }
+        
+        // Handle array access or struct member access
+        while (*ptr == '[' || *ptr == '.') {
+            if (*ptr == '[') {
+                ptr++;
+                int bracket_depth = 1;
+                while (*ptr && bracket_depth > 0) {
+                    if (*ptr == '[') bracket_depth++;
+                    else if (*ptr == ']') bracket_depth--;
+                    ptr++;
+                }
+            } else if (*ptr == '.') {
+                ptr++;
+                // Parse member name
+                while (isalnum(*ptr) || *ptr == '_') {
+                    ptr++;
+                }
+            }
+        }
+        
+        return ptr;
+    }
+    
+    // Handle parenthesized expressions
+    if (*ptr == '(') {
+        ptr++;
+        int paren_depth = 1;
+        int in_quotes = 0;
+        
+        while (*ptr && paren_depth > 0) {
+            if (*ptr == '"' && *(ptr-1) != '\\') {
+                in_quotes = !in_quotes;
+            } else if (*ptr == '\'' && *(ptr-1) != '\\') {
+                in_quotes = !in_quotes;
+            } else if (!in_quotes) {
+                if (*ptr == '(') {
+                    paren_depth++;
+                } else if (*ptr == ')') {
+                    paren_depth--;
+                }
+            }
+            ptr++;
+        }
+        return ptr;
+    }
+    
+    // If we can't identify the operand, just advance one character
+    return ptr + 1;
+}
+
+int is_operator_start(char* ptr) {
+    if (!*ptr) return 0;
+    
+    // Check for three-character operators first
+    if (ptr[2] && (
+        (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') ||  // <<=
+        (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')     // >>=
+    )) {
+        return 1;
+    }
+    
+    // Two-character operators
+    if (ptr[1] && (
+        (ptr[0] == '=' && ptr[1] == '=') ||  // ==
+        (ptr[0] == '!' && ptr[1] == '=') ||  // !=
+        (ptr[0] == '<' && ptr[1] == '=') ||  // <=
+        (ptr[0] == '>' && ptr[1] == '=') ||  // >=
+        (ptr[0] == '&' && ptr[1] == '&') ||  // &&
+        (ptr[0] == '|' && ptr[1] == '|') ||  // ||
+        (ptr[0] == '+' && ptr[1] == '+') ||  // ++
+        (ptr[0] == '-' && ptr[1] == '-') ||  // --
+        (ptr[0] == '+' && ptr[1] == '=') ||  // +=
+        (ptr[0] == '-' && ptr[1] == '=') ||  // -=
+        (ptr[0] == '*' && ptr[1] == '=') ||  // *=
+        (ptr[0] == '/' && ptr[1] == '=') ||  // /=
+        (ptr[0] == '%' && ptr[1] == '=') ||  // %=
+        (ptr[0] == '&' && ptr[1] == '=') ||  // &=
+        (ptr[0] == '|' && ptr[1] == '=') ||  // |=
+        (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
+        (ptr[0] == '<' && ptr[1] == '<') ||  // <<
+        (ptr[0] == '>' && ptr[1] == '>')     // >>
+    )) {
+        return 1;
+    }
+    
+    // Single-character operators
+    if (*ptr == '<' || *ptr == '>' || *ptr == '=' || *ptr == '!' || 
+        *ptr == '+' || *ptr == '-' || *ptr == '*' || *ptr == '/' || 
+        *ptr == '%' || *ptr == '&' || *ptr == '|' || *ptr == '^' || 
+        *ptr == '~') {
+        return 1;
+    }
+    
+    return 0;
+}
+
 void transpile(const char* input_filename, const char* output_filename) {
     FILE *input_file = fopen(input_filename, "r");
     FILE *output_file = fopen(output_filename, "w");
@@ -835,7 +1155,6 @@ void transpile(const char* input_filename, const char* output_filename) {
 
     // Transpile the actual code
     fseek(input_file, 0, SEEK_SET);
-    /* int in_function = 0; */
     /* int in_main_function = 0; */
     /* int is_first_function = 1; */
     /* int scope_level = 0; */
@@ -916,18 +1235,28 @@ void transpile(const char* input_filename, const char* output_filename) {
             continue;
         }
 
-        /* Check for end of function or scope */
+
+        // Check for end of function or scope
         if (in_function && strstr(line, "}")) {
+            // Calculate the correct indentation BEFORE any scope changes
+            int current_indentation = (scope_level - 1) * indentation;
+    
+            // Execute defers for the scope that is closing (current scope_level)
             pop_and_execute_defers(output_file, scope_level);
+    
+            // Now decrement the scope level
             scope_level--;
-            if (scope_level == 0) { // End of function
+    
+            if (scope_level == 0) { 
+                // End of function - no indentation for function closing brace
                 fprintf(output_file, "}\n");
                 in_function = 0;
                 if (in_main_function) {
                     in_main_function = 0;
                 }
             } else {
-                print_indentation(output_file, scope_level * indentation);
+                // End of nested scope - use calculated indentation
+                print_indentation(output_file, current_indentation);
                 fprintf(output_file, "}\n");
             }
             continue;
@@ -978,38 +1307,32 @@ void transpile(const char* input_filename, const char* output_filename) {
             continue;
         }
 
-       
         // Transpile if statements
         if (strstr(trimmed_line, "if ")) {
             int is_commented = strstr(line, "//") != NULL;
-            char condition[MAX_LINE_LENGTH];
-            sscanf(trimmed_line, "if %[^\n]", condition);
-
-            // Remove any trailing brace from the condition
-            char* brace_ptr = strrchr(condition, '{');
-            if (brace_ptr) {
-                *brace_ptr = '\0';
-            }
-
-            // Add parentheses around the condition if not present
-            if (condition[0] != '(') {
-                char temp[MAX_LINE_LENGTH];
-                snprintf(temp, MAX_LINE_LENGTH, "(%s)", condition);
-                strcpy(condition, temp);
-            }
-
-            // Remove trailing space before the closing parenthesis
-            char* space_ptr = strrchr(condition, ' ');
-            if (space_ptr && *(space_ptr + 1) == ')') {
-                *space_ptr = ')';
-                *(space_ptr + 1) = '\0';
-            }
-
-            // Translate the if statement
-            if (in_function) {
-                print_indentation(output_file, trimmed_line - line);
-            }
+            
             if (is_commented) {
+                // Handle commented if statements (keep existing logic)
+                char condition[MAX_LINE_LENGTH];
+                sscanf(trimmed_line, "if %[^\n]", condition);
+                char* brace_ptr = strrchr(condition, '{');
+                if (brace_ptr) {
+                    *brace_ptr = '\0';
+                }
+                if (condition[0] != '(') {
+                    char temp[MAX_LINE_LENGTH];
+                    snprintf(temp, MAX_LINE_LENGTH, "(%s)", condition);
+                    strcpy(condition, temp);
+                }
+                char* space_ptr = strrchr(condition, ' ');
+                if (space_ptr && *(space_ptr + 1) == ')') {
+                    *space_ptr = ')';
+                    *(space_ptr + 1) = '\0';
+                }
+                
+                if (in_function) {
+                    print_indentation(output_file, trimmed_line - line);
+                }
                 fprintf(output_file, "// if %s {\n", condition);
                 scope_level++;
                 while (fgets(line, sizeof(line), input_file)) {
@@ -1029,12 +1352,114 @@ void transpile(const char* input_filename, const char* output_filename) {
                     }
                 }
             } else {
-                fprintf(output_file, "if %s {\n", condition);
-                scope_level++;
+                // Parse non-commented if statements
+                char *if_start = strstr(trimmed_line, "if ");
+                char *condition_start = if_start + 3; // Skip "if "
+                
+                // Skip whitespace after "if"
+                while (*condition_start == ' ' || *condition_start == '\t') {
+                    condition_start++;
+                }
+                
+                // Make a copy to work with
+                char *line_copy = strdup(trimmed_line);
+                char *work_ptr = line_copy + (condition_start - trimmed_line);
+                
+                // Trim trailing whitespace and newline from copy
+                char *end = line_copy + strlen(line_copy) - 1;
+                while (end > line_copy && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r')) {
+                    *end = '\0';
+                    end--;
+                }
+                
+                // Check if this is a block if (contains '{') or single-line if (ends with ';')
+                char *brace_pos = strchr(work_ptr, '{');
+                
+                if (brace_pos) {
+                    // Block if statement: "if condition {" or "if (condition) {"
+                    char condition[MAX_LINE_LENGTH];
+                    int condition_len = brace_pos - work_ptr;
+                    strncpy(condition, work_ptr, condition_len);
+                    condition[condition_len] = '\0';
+                    
+                    // Trim trailing whitespace from condition
+                    char *cond_end = condition + strlen(condition) - 1;
+                    while (cond_end > condition && (*cond_end == ' ' || *cond_end == '\t')) {
+                        *cond_end = '\0';
+                        cond_end--;
+                    }
+                    
+                    // Output the if statement
+                    if (in_function) {
+                        print_indentation(output_file, trimmed_line - line);
+                    }
+                    
+                    if (condition[0] != '(') {
+                        fprintf(output_file, "if (%s) {\n", condition);
+                    } else {
+                        fprintf(output_file, "if %s {\n", condition);
+                    }
+                    scope_level++;
+                    
+                } else if (*end == ';') {
+                    // Single-line if statement: parse condition by recognizing C operators
+                    char *condition_end = find_condition_end(work_ptr);
+                    
+                    if (condition_end && condition_end > work_ptr) {
+                        // Extract condition
+                        char condition[MAX_LINE_LENGTH];
+                        int condition_len = condition_end - work_ptr;
+                        strncpy(condition, work_ptr, condition_len);
+                        condition[condition_len] = '\0';
+                        
+                        // Trim trailing whitespace from condition
+                        char *cond_end = condition + strlen(condition) - 1;
+                        while (cond_end > condition && (*cond_end == ' ' || *cond_end == '\t')) {
+                            *cond_end = '\0';
+                            cond_end--;
+                        }
+                        
+                        // Get statement part
+                        char *statement_start = condition_end;
+                        while (*statement_start == ' ' || *statement_start == '\t') {
+                            statement_start++;
+                        }
+                        
+                        // Output single-line if
+                        if (in_function) {
+                            print_indentation(output_file, trimmed_line - line);
+                        }
+                        
+                        if (condition[0] != '(') {
+                            fprintf(output_file, "if (%s) %s\n", condition, statement_start);
+                        } else {
+                            fprintf(output_file, "if %s %s\n", condition, statement_start);
+                        }
+                        // Don't increment scope_level for single-line if
+                        
+                    } else {
+                        // Couldn't parse properly, output as-is
+                        if (in_function) {
+                            print_indentation(output_file, trimmed_line - line);
+                        }
+                        fprintf(output_file, "%s", trimmed_line);
+                    }
+                    
+                } else {
+                    // Malformed if statement, output as-is
+                    if (in_function) {
+                        print_indentation(output_file, trimmed_line - line);
+                    }
+                    fprintf(output_file, "%s", trimmed_line);
+                }
+                
+                free(line_copy);
             }
             continue;
         }
-
+        
+        
+        
         // Transpile loop keyword
         if (strstr(trimmed_line, "loop {")) {
             handle_loop(output_file, scope_level * indentation);
@@ -1042,6 +1467,65 @@ void transpile(const char* input_filename, const char* output_filename) {
             continue;
         }
 
+
+        // Scope-open detection for while/for/anonymous
+        if (in_function) {
+            // Detect 'while (...) {' on one line
+            if (strstr(trimmed_line, "while") && strchr(trimmed_line, '{')) {
+                // Print the line as-is, preserving original indentation
+                print_indentation(output_file, trimmed_line - line);
+                fprintf(output_file, "%s", trimmed_line);
+                scope_level++; // <-- entering a new block
+                continue;
+            }
+
+            // Detect 'for (...) {' on one line
+            if (strstr(trimmed_line, "for") && strchr(trimmed_line, '{')) {
+                print_indentation(output_file, trimmed_line - line);
+                fprintf(output_file, "%s", trimmed_line);
+                scope_level++; // <-- entering a new block
+                continue;
+            }
+
+            // Detect standalone '{' (anonymous block)
+            {
+                const char *p = trimmed_line;
+                while (*p == ' ' || *p == '\t') p++; // skip leading whitespace
+                if (*p == '{') {
+                    print_indentation(output_file, trimmed_line - line);
+                    fprintf(output_file, "%s", trimmed_line);
+                    scope_level++; // <-- entering a new block
+                    continue;
+                }
+            }
+        }
+
+        // Handle defers before returns
+        if (in_function) {
+            // Skip commented lines (anything where '//' comes before 'return')
+            char *ret_pos = strstr(trimmed_line, "return");
+            if (ret_pos) {
+                char *comment_pos = strstr(trimmed_line, "//");
+                if (!comment_pos || comment_pos > ret_pos) {
+                    // Basic guard to avoid matching identifiers like 'myreturnValue'
+                    // Ensure the 'r' in 'return' is at token boundary.
+                    int starts_token = (ret_pos == trimmed_line) || isspace((unsigned char)*(ret_pos - 1));
+                    if (starts_token) {
+                        // 1) Emit all defers that are still pending at any open scope.
+                        pop_all_defers(output_file);
+
+                        // 2) Now print the 'return' line with its original indentation.
+                        print_indentation(output_file, trimmed_line - line);
+                        fprintf(output_file, "%s", trimmed_line);
+
+                        // 3) Continue; we’ve handled this line.
+                        continue;
+                    }
+                }
+            }
+        }
+
+        
         // Copy comments directly
         if (strstr(trimmed_line, "//")) {
             if (in_function) {
@@ -1050,7 +1534,7 @@ void transpile(const char* input_filename, const char* output_filename) {
             fprintf(output_file, "%s", trimmed_line);
             continue;
         }
-
+        
         // Copy function body lines if inside any function
         if (in_function) {
             print_indentation(output_file, trimmed_line - line);
@@ -1060,13 +1544,12 @@ void transpile(const char* input_filename, const char* output_filename) {
             fprintf(output_file, "%s", line);
         }
     }
-
+    
     fclose(input_file);
     fclose(output_file);
 }
 
 #include <stdbool.h>
-
 
 char* replace_extension(const char* filename, const char* new_extension) {
     char *new_filename = malloc(strlen(filename) + strlen(new_extension) + 1);
@@ -1087,7 +1570,7 @@ void jadeInit(const char *project_name) {
     char *path = malloc(path_len);
     
     mkdir(project_name, 0777); // Create directory with read/write/execute for all
-
+    
     // Create and write main.jade
     snprintf(path, path_len, "%s/main.jade", project_name);
     FILE *file = fopen(path, "w");
@@ -1096,7 +1579,7 @@ void jadeInit(const char *project_name) {
         fprintf(file, "fn main() -> i32 {\n    printf(\"Hello world\\n\");\n    return 0;\n}\n");
         fclose(file);
     }
-
+    
     // Create and write Makefile with proper tab indentation
     snprintf(path, path_len, "%s/Makefile", project_name);
     file = fopen(path, "w");
@@ -1135,7 +1618,7 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Usage: %s <command> [<args>]\n", argv[0]);
         return 1;
     }
-
+    
     if (strcmp(argv[1], "init") == 0) {
         if (argc != 3) {
             fprintf(stderr, "Usage: %s init <project_name>\n", argv[0]);
@@ -1150,6 +1633,6 @@ int main(int argc, char *argv[]) {
         printf("Transpiled %s to %s\n", input_filename, output_filename);
         free(output_filename);
     }
-
+    
     return 0;
 }

@@ -20,6 +20,7 @@ when converting from c to jade remember the initial c input and compile to exact
       fn add(int x) {
           self.x += x;
       }
+
   }
 
   fn main() -> i32 {

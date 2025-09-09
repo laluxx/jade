@@ -10,6 +10,10 @@ fn voidFunction() -> void {
 
 }
 
+fn boolFunction() -> bool {
+    return true;
+}
+
 let x:f32 = 29; // TODO here make it 29.0
 
 let st:str = "ciao";
@@ -38,8 +42,11 @@ let anotherBoolean = false;
 let arr = [1, 2, 3];
 
 let a = ['a'..'z'];
+
+
+
 let n = [1..100];
-let f = [1.0..45.0];
+let f = [1.0..100.0];
 
 let ifarr:[_]:f32 = [1.0, 1.0, 2.0];
 let tiiarr:[]i32 = [6.0, 7.0, 8.0];
@@ -56,17 +63,42 @@ let anarr:[10]:bool;
 int arrr[3] = {1, 2, 3}; // C syntax always works
 
 
+
+
 fn main() -> i32 {
     let variable:i32 = sub(2, 2); // NOTE This works somehow
-    let x:i32 = 10;
-    defer printf("Hello!\n"); // TODO Defers should pop before a return statement
 
+    let x:i32 = 10;
+    let y = 3;
+
+    defer printf("Hello!\n"); // TODO Defers should pop before a return statement
 
     if x > 3 {
         printf("Hello World\n");
     }
 
-    
+    if (x > 3) {
+        printf("Hello World\n");
+    }
+
+
+    if x > 3 printf("Hello World\n");
+    if x == y printf("Hello World\n");
+    if x >= y printf("Hello World\n");
+    if x == y return 0;
+    if x != y return 1;
+    if x <= y return 1;
+    if (x > 3) printf("Hello World\n");
+    if boolFunction() return 1;
+
+
+    while (true) printf("Yes\n");
+    while true printf("Yes\n");
+    while boolFunction() printf("No\n");
+
+    for 10 printf("Hello, world\n");
+    for x printf("Hello, world\n");
+
     loop {
         println!("something");
         break;
