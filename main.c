@@ -20,15 +20,18 @@
 // TODO IMPORTANT NEXT Get rid of MAX_LINE_LENGTH and work with dyamic lines
 // TODO if the main() function is not present treat everything as inside the main function (but use statement)
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdbool.h>
 
 #define MAX_LINE_LENGTH 8192 // TODO Dynamic memory allocation
 
-size_t indentation = 4; // TODO "-i" or "--indentation"
-size_t function_spacing = 1; // TODO "-fs" or "--function-spacing"
+size_t indentation = 4;             // TODO "-i" or "--indentation"
+size_t function_spacing = 1;        // TODO "-fs" or "--function-spacing"
+size_t newlines_after_includes = 3; // TODO "-nai" or "--newlines-after-include"
 
 int in_function = 0;
 int in_main_function = 0;
@@ -347,6 +350,9 @@ void convert_array_initializer(const char* jade_init, char* c_init, size_t c_ini
     *dst = '\0';
 }
 
+
+
+// TODO Multi dimentional arrays
 // Convert Jade array initializer [1,2,3] to C array initializer {1,2,3}
 void parse_variable_declaration(const char* line, FILE* output_file, int indentation_level) {
     char var_name[MAX_LINE_LENGTH];
@@ -354,83 +360,97 @@ void parse_variable_declaration(const char* line, FILE* output_file, int indenta
     char var_value[MAX_LINE_LENGTH] = "";
     char array_size[MAX_LINE_LENGTH] = "";
     int is_array = 0;
+    int is_const = 0; // NEW: support 'let const ...'
     
+    // Work with a movable pointer but keep 'line' for indentation calc
+    const char *orig = line;
     char *trimmed_line = (char*)line;
+
+    // Skip leading whitespace
     while (*trimmed_line == ' ' || *trimmed_line == '\t') {
         trimmed_line++;
     }
-    
-    // Check if it's an array declaration with [size] syntax
+
+    // NEW: detect and skip "let const " or "let "
+    if (strncmp(trimmed_line, "let const ", 10) == 0) {
+        is_const = 1;
+        trimmed_line += 10; // past "let const "
+    } else if (strncmp(trimmed_line, "let ", 4) == 0) {
+        trimmed_line += 4; // past "let "
+    }
+    // From here on, trimmed_line starts at:  <name>[...] ...  (no "let"/"let const")
+
+    // Check if it's an array declaration with [size] syntax (before '=' means declarator, not initializer)
     if (strstr(trimmed_line, "[") && strchr(trimmed_line, ']')) {
         char *bracket_start = strchr(trimmed_line, '[');
         char *bracket_end = strchr(bracket_start, ']');
-        
+
         // Make sure this is part of the variable declaration, not the initializer
         char *equals_pos = strchr(trimmed_line, '=');
         if (!equals_pos || bracket_start < equals_pos) {
             is_array = 1;
-            
+
             // Extract array size specification
             strncpy(array_size, bracket_start + 1, bracket_end - bracket_start - 1);
             array_size[bracket_end - bracket_start - 1] = '\0';
-            
-            // Parse variable name (everything between "let " and "[")
-            sscanf(trimmed_line, "let %[^[]", var_name);
+
+            // Parse variable name (everything before "[")
+            sscanf(trimmed_line, "%[^[]", var_name);
             int len = strlen(var_name);
             if (len > 0 && var_name[len - 1] == ':') {
                 var_name[len - 1] = '\0';
             }
-            
+
             // Check what comes after the bracket
             char *after_bracket = bracket_end + 1;
-            
+
             // Skip whitespace
             while (*after_bracket == ' ' || *after_bracket == '\t') {
                 after_bracket++;
             }
-            
+
             // Handle different syntax patterns
             if (*after_bracket == ':') {
-                // Pattern: let arr:[10]:type or let arr:[10]:type = [...]
+                // Pattern: name:[10]:type or name:[10]:type = [...]
                 after_bracket++; // Skip the ':'
-                
+
                 // Skip more whitespace
                 while (*after_bracket == ' ' || *after_bracket == '\t') {
                     after_bracket++;
                 }
-                
+
                 // Extract type and optional value
                 char temp_line[MAX_LINE_LENGTH];
                 strcpy(temp_line, after_bracket);
-                
+
                 char *equals_in_temp = strchr(temp_line, '=');
                 if (equals_in_temp) {
-                    // Has assignment: let arr:[10]:type = [...]
+                    // Has assignment: name:[10]:type = [...]
                     *equals_in_temp = '\0'; // Split at equals
-                    
+
                     // Get type (before equals)
                     sscanf(temp_line, "%s", var_type);
-                    
+
                     // Get value (after equals)
                     sscanf(equals_in_temp + 1, " %[^\n]", var_value);
                 } else {
-                    // No assignment: let arr:[10]:type;
+                    // No assignment: name:[10]:type;
                     // Remove semicolon and get type
                     char *semicolon = strchr(temp_line, ';');
                     if (semicolon) *semicolon = '\0';
                     sscanf(temp_line, "%s", var_type);
                 }
-                
+
             } else if (*after_bracket && !(*after_bracket == ';' || *after_bracket == '\n')) {
-                // Pattern: let arr:[10]type or let arr:[10]type = [...]
+                // Pattern: name:[10]type or name:[10]type = [...]
                 char temp_line[MAX_LINE_LENGTH];
                 strcpy(temp_line, after_bracket);
-                
+
                 char *equals_in_temp = strchr(temp_line, '=');
                 if (equals_in_temp) {
                     // Has assignment
                     *equals_in_temp = '\0';
-                    
+
                     // Get type (before equals, trim whitespace)
                     char *type_start = temp_line;
                     while (*type_start == ' ' || *type_start == '\t') type_start++;
@@ -438,14 +458,14 @@ void parse_variable_declaration(const char* line, FILE* output_file, int indenta
                     while (type_end > type_start && (*type_end == ' ' || *type_end == '\t')) type_end--;
                     *(type_end + 1) = '\0';
                     strcpy(var_type, type_start);
-                    
+
                     // Get value (after equals)
                     sscanf(equals_in_temp + 1, " %[^\n]", var_value);
                 } else {
-                    // No assignment: let arr:[10]type;
+                    // No assignment: name:[10]type;
                     char *semicolon = strchr(temp_line, ';');
                     if (semicolon) *semicolon = '\0';
-                    
+
                     // Get type, trim whitespace
                     char *type_start = temp_line;
                     while (*type_start == ' ' || *type_start == '\t') type_start++;
@@ -454,104 +474,118 @@ void parse_variable_declaration(const char* line, FILE* output_file, int indenta
                     *(type_end + 1) = '\0';
                     strcpy(var_type, type_start);
                 }
-                
+
             } else {
-                // Pattern: let arr:[10]; or let arr:[10] = [...]
+                // Pattern: name:[10]; or name:[10] = [...]
                 char *rest_of_line = after_bracket;
                 while (*rest_of_line == ' ' || *rest_of_line == '\t') rest_of_line++;
-                
+
                 if (*rest_of_line == '=') {
-                    // Has assignment, infer type
+                    // Has assignment, infer type later
                     sscanf(rest_of_line + 1, " %[^\n]", var_value);
-                    // Type will be inferred later
                 }
-                // If no assignment and no type, var_type remains empty (will cause error, but that's expected)
+                // If no assignment and no type, var_type remains empty (expected)
             }
         }
     }
-    
-    // Check for simple array assignment without [size] syntax: let harr = [1, 2, 3];
+
+    // Check for simple array assignment without [size] syntax: name = [1, 2, 3];
     if (!is_array && strchr(trimmed_line, '=')) {
         char temp_value[MAX_LINE_LENGTH];
         if (strstr(trimmed_line, ":")) {
-            sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, temp_value);
+            sscanf(trimmed_line, "%[^:]:%s = %[^\n]", var_name, var_type, temp_value);
         } else {
-            sscanf(trimmed_line, "let %s = %[^\n]", var_name, temp_value);
+            sscanf(trimmed_line, "%s = %[^\n]", var_name, temp_value);
         }
-        
+
         // Check if the value starts with '[' (array initializer)
         char *trimmed_value = temp_value;
         while (*trimmed_value == ' ' || *trimmed_value == '\t') trimmed_value++;
-        
+
         if (*trimmed_value == '[') {
             is_array = 1;
             strcpy(var_value, temp_value);
             strcpy(array_size, "_"); // Inferred size
-            
+
             // If no type was specified, infer it from the array elements
             if (strlen(var_type) == 0) {
                 strcpy(var_type, infer_array_type(var_value));
             }
         }
     }
-    
+
     // If not an array, handle as regular variable
     if (!is_array) {
         if (strstr(trimmed_line, ":")) {
-            sscanf(trimmed_line, "let %[^:]:%s = %[^\n]", var_name, var_type, var_value);
+            sscanf(trimmed_line, "%[^:]:%s = %[^\n]", var_name, var_type, var_value);
         } else {
-            sscanf(trimmed_line, "let %s = %[^\n]", var_name, var_value);
+            sscanf(trimmed_line, "%s = %[^\n]", var_name, var_value);
             strcpy(var_type, infer_type_from_value(var_value));
         }
     }
-    
-    // Remove any trailing semicolon
-    char *end_ptr = var_value + strlen(var_value) - 1;
-    if (*end_ptr == ';') {
-        *end_ptr = '\0';
+
+    // Remove any trailing semicolon from var_value
+    if (var_value[0]) {
+        char *end_ptr = var_value + strlen(var_value) - 1;
+        while (end_ptr >= var_value && (*end_ptr == ';' || *end_ptr == ' ' || *end_ptr == '\t' || *end_ptr == '\r' || *end_ptr == '\n')) {
+            *end_ptr-- = '\0';
+        }
     }
-    
+
     if (is_array) {
         const char *element_type;
         int array_count = 0;
-        
+
         // Determine element type
         if (strlen(var_type) > 0) {
             element_type = map_type(var_type);
         } else {
             element_type = infer_array_type(var_value);
         }
-        
-        // Convert Jade array initializer to C array initializer
+
+        // Convert Jade array initializer [..] or range to C {...}
         char c_initializer[MAX_LINE_LENGTH];
+        c_initializer[0] = '\0';
         if (strlen(var_value) > 0) {
             convert_array_initializer(var_value, c_initializer, MAX_LINE_LENGTH);
         }
-        
+
         // Print indentation
         print_indentation(output_file, indentation_level);
-        
+
         if (strcmp(array_size, "_") == 0) {
-            // Inferred size array: int arr[] = {1, 2, 3};
+            // Inferred size array: const? type name[] = {...};
             if (strlen(var_value) > 0) {
-                fprintf(output_file, "%s %s[] = %s;\n", element_type, var_name, c_initializer);
+                fprintf(output_file, "%s%s %s[] = %s;\n",
+                        is_const ? "const " : "",
+                        element_type, var_name, c_initializer);
             } else {
-                fprintf(output_file, "%s %s[];\n", element_type, var_name);
+                fprintf(output_file, "%s%s %s[];\n",
+                        is_const ? "const " : "",
+                        element_type, var_name);
             }
         } else if (strlen(array_size) == 0) {
-            // Dynamic array - count elements and create fixed size
+            // No size explicitly provided
             array_count = count_array_elements(var_value);
             if (strlen(var_value) > 0) {
-                fprintf(output_file, "%s %s[%d] = %s;\n", element_type, var_name, array_count, c_initializer);
+                fprintf(output_file, "%s%s %s[%d] = %s;\n",
+                        is_const ? "const " : "",
+                        element_type, var_name, array_count, c_initializer);
             } else {
-                fprintf(output_file, "%s %s[];\n", element_type, var_name);
+                fprintf(output_file, "%s%s %s[];\n",
+                        is_const ? "const " : "",
+                        element_type, var_name);
             }
         } else {
-            // Fixed size array: int arr[10] = {1, 2, 3};
+            // Fixed size array
             if (strlen(var_value) > 0) {
-                fprintf(output_file, "%s %s[%s] = %s;\n", element_type, var_name, array_size, c_initializer);
+                fprintf(output_file, "%s%s %s[%s] = %s;\n",
+                        is_const ? "const " : "",
+                        element_type, var_name, array_size, c_initializer);
             } else {
-                fprintf(output_file, "%s %s[%s] = {0};\n", element_type, var_name, array_size);
+                fprintf(output_file, "%s%s %s[%s] = {0};\n",
+                        is_const ? "const " : "",
+                        element_type, var_name, array_size);
             }
         }
     } else {
@@ -559,37 +593,78 @@ void parse_variable_declaration(const char* line, FILE* output_file, int indenta
         const char *c_type = strlen(var_type) > 0
             ? map_type(var_type)
             : infer_type_from_value(var_value);
-        
+
         print_indentation(output_file, indentation_level);
         if (strlen(var_value) > 0) {
-            fprintf(output_file, "%s %s = %s;\n", c_type, var_name, var_value);
+            fprintf(output_file, "%s%s %s = %s;\n",
+                    is_const ? "const " : "",
+                    c_type, var_name, var_value);
         } else {
-            fprintf(output_file, "%s %s;\n", c_type, var_name);
+            fprintf(output_file, "%s%s %s;\n",
+                    is_const ? "const " : "",
+                    c_type, var_name);
         }
     }
 }
 
-//TODO IMPORTANT Automatically include stdint.h if needed 
+
+bool needs_stdint = false;
+
 const char* map_type(const char* input_type) {
-    if (strcmp(input_type, "i8"    ) == 0) return "int8_t";
-    if (strcmp(input_type, "u8"    ) == 0) return "uint8_t";
-    if (strcmp(input_type, "i16"   ) == 0) return "int16_t";
-    if (strcmp(input_type, "u16"   ) == 0) return "uint16_t";
-    if (strcmp(input_type, "i32"   ) == 0) return "int";
-    if (strcmp(input_type, "u32"   ) == 0) return "uint32_t";
-    if (strcmp(input_type, "i64"   ) == 0) return "int64_t";
-    if (strcmp(input_type, "u64"   ) == 0) return "uint64_t";
-    if (strcmp(input_type, "i128"  ) == 0) return "int128_t";
-    if (strcmp(input_type, "u128"  ) == 0) return "uint128_t";
-    if (strcmp(input_type, "f32"   ) == 0) return "float";
-    if (strcmp(input_type, "f64"   ) == 0) return "double";
-    if (strcmp(input_type, "int"   ) == 0) return "int";
-    if (strcmp(input_type, "float" ) == 0) return "float";
-    if (strcmp(input_type, "char"  ) == 0) return "char";
-    if (strcmp(input_type, "str"   ) == 0) return "char*";
-    if (strcmp(input_type, "bool"  ) == 0) return "bool";
+    if (strcmp(input_type, "i8"   ) == 0) { needs_stdint = true; return "int8_t";  }
+    if (strcmp(input_type, "u8"   ) == 0) { needs_stdint = true; return "uint8_t"; }
+    if (strcmp(input_type, "i16"  ) == 0) { needs_stdint = true; return "int16_t"; }
+    if (strcmp(input_type, "u16"  ) == 0) { needs_stdint = true; return "uint16_t";}
+    if (strcmp(input_type, "i32"  ) == 0) {                      return "int";     }
+    if (strcmp(input_type, "u32"  ) == 0) { needs_stdint = true; return "uint32_t";}
+    if (strcmp(input_type, "i64"  ) == 0) { needs_stdint = true; return "int64_t"; }
+    if (strcmp(input_type, "u64"  ) == 0) { needs_stdint = true; return "uint64_t";}
+    if (strcmp(input_type, "i128" ) == 0) {                      return "__int128";}
+    if (strcmp(input_type, "u128" ) == 0) {                      return "unsigned __int128";}
+    if (strcmp(input_type, "f32"  ) == 0) {                      return "float";   }
+    if (strcmp(input_type, "f64"  ) == 0) {                      return "double";  }
+    if (strcmp(input_type, "int"  ) == 0) {                      return "int";     }
+    if (strcmp(input_type, "float") == 0) {                      return "float";   }
+    if (strcmp(input_type, "char" ) == 0) {                      return "char";    }
+    if (strcmp(input_type, "str"  ) == 0) {                      return "char*";   }
+    if (strcmp(input_type, "bool" ) == 0) {                      return "bool";    }
     return input_type; // _->
 }
+
+int line_has_token(const char* line, const char* tok) {
+    const char* p = line;
+    size_t n = strlen(tok);
+    while ((p = strstr(p, tok))) {
+        // skip if in line comment
+        const char* slashes = strstr(line, "//");
+        if (slashes && slashes < p) return 0;
+
+        // word boundary check
+        char before = (p==line) ? ' ' : p[-1];
+        char after  = p[n];
+        int lb = !(isalnum((unsigned char)before) || before=='_');
+        int rb = !(isalnum((unsigned char)after ) || after =='_');
+        if (lb && rb) return 1;
+        p += n;
+    }
+    return 0;
+}
+
+void prescan_stdint_need(FILE* f) {
+    fseek(f, 0, SEEK_SET);
+    char buf[MAX_LINE_LENGTH];
+    while (fgets(buf, sizeof buf, f)) {
+        if (line_has_token(buf, "u8")  || line_has_token(buf, "i8")  ||
+            line_has_token(buf, "u16") || line_has_token(buf, "i16") ||
+            line_has_token(buf, "u32") /* i32 maps to int */         ||
+            line_has_token(buf, "u64") || line_has_token(buf, "i64")) {
+            needs_stdint = true;
+            break;
+        }
+    }
+    fseek(f, 0, SEEK_SET);
+}
+
 
 
 void gather_prototypes(FILE *input_file, char prototypes[][MAX_LINE_LENGTH], int *prototype_count) {
@@ -1082,6 +1157,7 @@ int is_operator_start(char* ptr) {
     return 0;
 }
 
+
 void transpile(const char* input_filename, const char* output_filename) {
     FILE *input_file = fopen(input_filename, "r");
     FILE *output_file = fopen(output_filename, "w");
@@ -1109,6 +1185,9 @@ void transpile(const char* input_filename, const char* output_filename) {
 
     gather_prototypes(input_file, prototypes, &prototype_count);
 
+
+    prescan_stdint_need(input_file);
+    
     // Check for usage of printf (println!) that is not commented out
     fseek(input_file, 0, SEEK_SET);
     char line[MAX_LINE_LENGTH];
@@ -1139,14 +1218,26 @@ void transpile(const char* input_filename, const char* output_filename) {
             fprintf(output_file, "#include <stdio.h>\n");
         }
     }
-    if (prototype_count > 0 || uses_stdio) {
-        fprintf(output_file, "\n");
+
+    if (needs_stdint) {
+        int has = 0;
+        for (int i = 0; i < include_count; i++)
+            if (strstr(includes[i], "#include <stdint.h>") && !strstr(includes[i], "/*")) { has = 1; break; }
+        if (!has) fprintf(output_file, "#include <stdint.h>\n");
+    }
+
+
+    if (prototype_count > 0 || uses_stdio || needs_stdint) {
+        for (int i = 0; i < newlines_after_includes; i++) {
+            fprintf(output_file, "\n");
+        }
     }
 
     // Write the prototypes at the top of the file
     for (int i = 0; i < prototype_count; i++) {
         fprintf(output_file, "%s\n", prototypes[i]);
     }
+
     if (prototype_count > 0) {
         for (size_t i = 0; i < function_spacing; i++) {
             fprintf(output_file, "\n");
@@ -1526,14 +1617,18 @@ void transpile(const char* input_filename, const char* output_filename) {
         }
 
         
-        // Copy comments directly
-        if (strstr(trimmed_line, "//")) {
-            if (in_function) {
-                print_indentation(output_file, trimmed_line - line);
+        // Comments: preserve original indentation exactly
+        {
+            const char *p = line;
+            while (*p == ' ' || *p == '\t') p++;   // skip leading whitespace
+            if (p[0] == '/' && p[1] == '/') {
+                // It's a comment-only line. Print exactly as written.
+                fputs(line, output_file);
+                continue;
             }
-            fprintf(output_file, "%s", trimmed_line);
-            continue;
         }
+
+
         
         // Copy function body lines if inside any function
         if (in_function) {
@@ -1549,7 +1644,6 @@ void transpile(const char* input_filename, const char* output_filename) {
     fclose(output_file);
 }
 
-#include <stdbool.h>
 
 char* replace_extension(const char* filename, const char* new_extension) {
     char *new_filename = malloc(strlen(filename) + strlen(new_extension) + 1);
