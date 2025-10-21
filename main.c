@@ -8,15 +8,12 @@
 // TODO http use statement
 // TODO Work with arrays as lists in fp using HEAD and TAIL or car and cdr
 // TODO IMPORTANT automatic .h file creation
-// TODO LATER STNTAX double x = x*2
 // TODO SYNTAX pattern matching
 // FIXME Why does let add one newline between functions?
-// TODO IMPORTANT FIX if
 // TODO IMPORTANT Emacs jade-mode
 // TODO support inline asm
 // TODO jade jit REPL && client for emacs
 // TODO IMPORTANT Automatic lib linking based on the use statements
-// TODO NEXT fix closing curly brace of the while
 // TODO IMPORTANT NEXT Get rid of MAX_LINE_LENGTH and work with dyamic lines
 // TODO if the main() function is not present treat everything as inside the main function (but use statement)
 
@@ -37,6 +34,9 @@ int in_function = 0;
 int in_main_function = 0;
 int is_first_function = 1;
 int scope_level = 0;
+
+char current_impl_type[MAX_LINE_LENGTH] = "";
+int in_impl_block = 0;
 
 void print_indentation(FILE *output_file, size_t level) {
     for (size_t i = 0; i < level; i++) {
@@ -666,54 +666,95 @@ void prescan_stdint_need(FILE* f) {
 }
 
 
-
 void gather_prototypes(FILE *input_file, char prototypes[][MAX_LINE_LENGTH], int *prototype_count) {
     char line[MAX_LINE_LENGTH];
+    int in_impl = 0;
+    int impl_brace_depth = 0;  // Track brace depth within impl
+    
     fseek(input_file, 0, SEEK_SET);
     while (fgets(line, sizeof(line), input_file)) {
-        // Check for function definition
-        if (strstr(line, "fn ") && strstr(line, "{")) {
+        // Skip leading whitespace for checking
+        char *trimmed = line;
+        while (*trimmed == ' ' || *trimmed == '\t') trimmed++;
+        
+        // Track when we enter impl blocks
+        if (strstr(trimmed, "impl ") && strstr(trimmed, "{")) {
+            in_impl = 1;
+            impl_brace_depth = 1;  // Start counting braces
+            continue;
+        }
+        
+        // Track braces when inside impl
+        if (in_impl) {
+            // Count opening braces
+            for (char *p = trimmed; *p; p++) {
+                if (*p == '{') impl_brace_depth++;
+                else if (*p == '}') impl_brace_depth--;
+            }
+            
+            // Exit impl block when depth returns to 0
+            if (impl_brace_depth == 0) {
+                in_impl = 0;
+            }
+            continue;  // Skip all lines inside impl
+        }
+        
+        // Check for function definition (only process if NOT in impl)
+        if (strstr(trimmed, "fn ") && strstr(trimmed, "{")) {
             char function_name[MAX_LINE_LENGTH];
             char parameters[MAX_LINE_LENGTH];
             char return_type[MAX_LINE_LENGTH] = "void";
-
-            // Parse function signature
-            sscanf(line, "fn %s", function_name);
-            char *start_params = strchr(line, '(') + 1;
-            char *end_params = strchr(line, ')');
+            
+            // Parse function name - find "fn " then read until '('
+            char *fn_start = strstr(trimmed, "fn ");
+            if (fn_start) {
+                fn_start += 3; // Skip "fn "
+                while (*fn_start == ' ' || *fn_start == '\t') fn_start++;
+                char *paren = strchr(fn_start, '(');
+                if (paren) {
+                    int name_len = paren - fn_start;
+                    strncpy(function_name, fn_start, name_len);
+                    function_name[name_len] = '\0';
+                }
+            }
+            
+            char *start_params = strchr(trimmed, '(') + 1;
+            char *end_params = strchr(trimmed, ')');
             strncpy(parameters, start_params, end_params - start_params);
             parameters[end_params - start_params] = '\0';
-
+            
             // Check for return type
-            char *return_type_pos = strstr(line, "->");
+            char *return_type_pos = strstr(trimmed, "->");
             if (return_type_pos != NULL) {
                 sscanf(return_type_pos, "-> %s", return_type);
                 strcpy(return_type, map_type(return_type));
             }
-
-            // Remove the "fn " prefix and the return type part
-            strtok(function_name, "(");
-
+            
             // Translate parameters
             char translated_params[MAX_LINE_LENGTH] = "";
             char *param = strtok(parameters, ",");
             while (param != NULL) {
-                char param_name[MAX_LINE_LENGTH];
-                char param_type[MAX_LINE_LENGTH];
-                sscanf(param, "%[^:]:%s", param_name, param_type);
-                strcat(translated_params, map_type(param_type));
-                strcat(translated_params, " ");
-                strcat(translated_params, param_name);
-                param = strtok(NULL, ",");
-                if (param != NULL) {
-                    strcat(translated_params, ", ");
+                while (*param == ' ' || *param == '\t') param++;
+                
+                if (strlen(param) > 0) {
+                    char param_name[MAX_LINE_LENGTH];
+                    char param_type[MAX_LINE_LENGTH];
+                    sscanf(param, "%[^:]:%s", param_name, param_type);
+                    strcat(translated_params, map_type(param_type));
+                    strcat(translated_params, " ");
+                    strcat(translated_params, param_name);
+                    param = strtok(NULL, ",");
+                    if (param != NULL) {
+                        strcat(translated_params, ", ");
+                    }
                 }
             }
-
+            
             // NOTE Exclude main function from prototypes
             if (strcmp(function_name, "main") != 0) {
                 // Store the prototype
-                snprintf(prototypes[*prototype_count], MAX_LINE_LENGTH, "%s %s(%s);", return_type, function_name, translated_params);
+                snprintf(prototypes[*prototype_count], MAX_LINE_LENGTH, 
+                         "%s %s(%s);", return_type, function_name, translated_params);
                 (*prototype_count)++;
             }
         }
@@ -727,9 +768,9 @@ void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *in
         if (strstr(line, "use ")) {
             char library[MAX_LINE_LENGTH];
             int is_commented = (strstr(line, "//") == line);
-
+            
             sscanf(line, is_commented ? "// use %s" : "use %s", library);
-
+            
             if (strcmp(library, "stdio") == 0) {
                 snprintf(includes[*include_count], MAX_LINE_LENGTH, "%s#include <stdio.h>", is_commented ? "/* " : "");
                 if (!is_commented) {
@@ -758,7 +799,7 @@ void handle_loop(FILE *output_file, int indentation_level) {
     for (int i = 0; i < indentation_level; i++) {
         fprintf(output_file, " ");
     }
-
+    
     fprintf(output_file, "while (1) {\n");
 }
 
@@ -767,7 +808,7 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     char type_name[MAX_LINE_LENGTH];
     char fields[MAX_LINE_LENGTH * 10]; // Assuming a maximum of 10 lines of fields for simplicity
     int is_recursive = 0;
-
+    
     // Check if it's a recursive type
     if (strstr(line, "rec type ")) {
         is_recursive = 1;
@@ -775,28 +816,28 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
     } else {
         sscanf(line, "type %s {", type_name);
     }
-
+    
     // Initialize fields
     fields[0] = '\0';
-
+    
     // Read the lines containing the fields
     while (fgets(line, MAX_LINE_LENGTH, input_file)) {
         // Check for the closing brace
         if (strstr(line, "}")) {
             break;
         }
-
+        
         // Append the line to the fields string
         strcat(fields, line);
     }
-
+    
     // Print the typedef struct
     if (is_recursive) {
         fprintf(output_file, "typedef struct %s {\n", type_name);
     } else {
         fprintf(output_file, "typedef struct {\n");
     }
-
+    
     // Print fields with indentation
     char field_name[MAX_LINE_LENGTH];
     char field_type[MAX_LINE_LENGTH];
@@ -810,7 +851,7 @@ void handleType(FILE *input_file, FILE *output_file, const char *line) {
         }
         field_line = strtok(NULL, "\n");
     }
-
+    
     // Close the struct
     fprintf(output_file, "} %s;\n\n", type_name);
 }
@@ -833,16 +874,16 @@ const char *infer_type_from_value(const char *value) {
     strtol(value, &endptr, 10);
     while (*endptr == ' ')
         endptr++; // Skip trailing whitespace
-
+    
     if (*endptr == '\0' || *endptr == ';') {
         return "int";
     }
-
+    
     // BOOL NOTE we check bool last so we can write false or true in a comment
     if (strstr(value, "true") || strstr(value, "false")) {
         return "bool";
     }
-
+    
     // _->
     return "ERROR";
 }
@@ -899,7 +940,7 @@ char* parse_complete_expression(char* start) {
     while (*ptr == ' ' || *ptr == '\t') {
         ptr++;
     }
-   
+    
     // Parse operators and subsequent operands
     while (*ptr && is_operator_start(ptr)) {
         // Skip the operator
@@ -908,7 +949,7 @@ char* parse_complete_expression(char* start) {
         } else {
             ptr++;
         }
-
+        
         // Skip whitespace after operator
         while (*ptr == ' ' || *ptr == '\t') {
             ptr++;
@@ -930,27 +971,27 @@ int is_two_char_operator(char* ptr) {
     if (!ptr[1]) return 0;
     
     return (
-        (ptr[0] == '=' && ptr[1] == '=') ||  // ==
-        (ptr[0] == '!' && ptr[1] == '=') ||  // !=
-        (ptr[0] == '<' && ptr[1] == '=') ||  // <=
-        (ptr[0] == '>' && ptr[1] == '=') ||  // >=
-        (ptr[0] == '&' && ptr[1] == '&') ||  // &&
-        (ptr[0] == '|' && ptr[1] == '|') ||  // ||
-        (ptr[0] == '+' && ptr[1] == '+') ||  // ++
-        (ptr[0] == '-' && ptr[1] == '-') ||  // --
-        (ptr[0] == '+' && ptr[1] == '=') ||  // +=
-        (ptr[0] == '-' && ptr[1] == '=') ||  // -=
-        (ptr[0] == '*' && ptr[1] == '=') ||  // *=
-        (ptr[0] == '/' && ptr[1] == '=') ||  // /=
-        (ptr[0] == '%' && ptr[1] == '=') ||  // %=
-        (ptr[0] == '&' && ptr[1] == '=') ||  // &=
-        (ptr[0] == '|' && ptr[1] == '=') ||  // |=
-        (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
-        (ptr[0] == '<' && ptr[1] == '<') ||  // <<
-        (ptr[0] == '>' && ptr[1] == '>') ||  // >>
-        (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') || // <<= (handle as special case)
-        (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')    // >>= (handle as special case)
-    );
+            (ptr[0] == '=' && ptr[1] == '=') ||  // ==
+            (ptr[0] == '!' && ptr[1] == '=') ||  // !=
+            (ptr[0] == '<' && ptr[1] == '=') ||  // <=
+            (ptr[0] == '>' && ptr[1] == '=') ||  // >=
+            (ptr[0] == '&' && ptr[1] == '&') ||  // &&
+            (ptr[0] == '|' && ptr[1] == '|') ||  // ||
+            (ptr[0] == '+' && ptr[1] == '+') ||  // ++
+            (ptr[0] == '-' && ptr[1] == '-') ||  // --
+            (ptr[0] == '+' && ptr[1] == '=') ||  // +=
+            (ptr[0] == '-' && ptr[1] == '=') ||  // -=
+            (ptr[0] == '*' && ptr[1] == '=') ||  // *=
+            (ptr[0] == '/' && ptr[1] == '=') ||  // /=
+            (ptr[0] == '%' && ptr[1] == '=') ||  // %=
+            (ptr[0] == '&' && ptr[1] == '=') ||  // &=
+            (ptr[0] == '|' && ptr[1] == '=') ||  // |=
+            (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
+            (ptr[0] == '<' && ptr[1] == '<') ||  // <<
+            (ptr[0] == '>' && ptr[1] == '>') ||  // >>
+            (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') || // <<= (handle as special case)
+            (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')    // >>= (handle as special case)
+            );
 }
 
 
@@ -1116,33 +1157,33 @@ int is_operator_start(char* ptr) {
     
     // Check for three-character operators first
     if (ptr[2] && (
-        (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') ||  // <<=
-        (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')     // >>=
-    )) {
+                   (ptr[0] == '<' && ptr[1] == '<' && ptr[2] == '=') ||  // <<=
+                   (ptr[0] == '>' && ptr[1] == '>' && ptr[2] == '=')     // >>=
+                   )) {
         return 1;
     }
     
     // Two-character operators
     if (ptr[1] && (
-        (ptr[0] == '=' && ptr[1] == '=') ||  // ==
-        (ptr[0] == '!' && ptr[1] == '=') ||  // !=
-        (ptr[0] == '<' && ptr[1] == '=') ||  // <=
-        (ptr[0] == '>' && ptr[1] == '=') ||  // >=
-        (ptr[0] == '&' && ptr[1] == '&') ||  // &&
-        (ptr[0] == '|' && ptr[1] == '|') ||  // ||
-        (ptr[0] == '+' && ptr[1] == '+') ||  // ++
-        (ptr[0] == '-' && ptr[1] == '-') ||  // --
-        (ptr[0] == '+' && ptr[1] == '=') ||  // +=
-        (ptr[0] == '-' && ptr[1] == '=') ||  // -=
-        (ptr[0] == '*' && ptr[1] == '=') ||  // *=
-        (ptr[0] == '/' && ptr[1] == '=') ||  // /=
-        (ptr[0] == '%' && ptr[1] == '=') ||  // %=
-        (ptr[0] == '&' && ptr[1] == '=') ||  // &=
-        (ptr[0] == '|' && ptr[1] == '=') ||  // |=
-        (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
-        (ptr[0] == '<' && ptr[1] == '<') ||  // <<
-        (ptr[0] == '>' && ptr[1] == '>')     // >>
-    )) {
+                   (ptr[0] == '=' && ptr[1] == '=') ||  // ==
+                   (ptr[0] == '!' && ptr[1] == '=') ||  // !=
+                   (ptr[0] == '<' && ptr[1] == '=') ||  // <=
+                   (ptr[0] == '>' && ptr[1] == '=') ||  // >=
+                   (ptr[0] == '&' && ptr[1] == '&') ||  // &&
+                   (ptr[0] == '|' && ptr[1] == '|') ||  // ||
+                   (ptr[0] == '+' && ptr[1] == '+') ||  // ++
+                   (ptr[0] == '-' && ptr[1] == '-') ||  // --
+                   (ptr[0] == '+' && ptr[1] == '=') ||  // +=
+                   (ptr[0] == '-' && ptr[1] == '=') ||  // -=
+                   (ptr[0] == '*' && ptr[1] == '=') ||  // *=
+                   (ptr[0] == '/' && ptr[1] == '=') ||  // /=
+                   (ptr[0] == '%' && ptr[1] == '=') ||  // %=
+                   (ptr[0] == '&' && ptr[1] == '=') ||  // &=
+                   (ptr[0] == '|' && ptr[1] == '=') ||  // |=
+                   (ptr[0] == '^' && ptr[1] == '=') ||  // ^=
+                   (ptr[0] == '<' && ptr[1] == '<') ||  // <<
+                   (ptr[0] == '>' && ptr[1] == '>')     // >>
+                   )) {
         return 1;
     }
     
@@ -1161,31 +1202,31 @@ int is_operator_start(char* ptr) {
 void transpile(const char* input_filename, const char* output_filename) {
     FILE *input_file = fopen(input_filename, "r");
     FILE *output_file = fopen(output_filename, "w");
-
+    
     if (!input_file) {
         fprintf(stderr, "Could not open input file %s\n", input_filename);
         exit(1);
     }
-
+    
     if (!output_file) {
         fprintf(stderr, "Could not open output file %s\n", output_filename);
         exit(1);
     }
-
-
+    
+    
     // Gather includes
     char includes[100][MAX_LINE_LENGTH]; // Assuming a maximum of 100 includes
     int include_count = 0;
     int uses_stdio = 0; // Flag to track usage of printf
     gather_includes(input_file, includes, &include_count, &uses_stdio);
-
+    
     // Gather prototypes
     char prototypes[100] [MAX_LINE_LENGTH]; // Assuming a maximum of 100 prototypes
     int prototype_count = 0;
-
+    
     gather_prototypes(input_file, prototypes, &prototype_count);
-
-
+    
+    
     prescan_stdint_need(input_file);
     
     // Check for usage of printf (println!) that is not commented out
@@ -1201,7 +1242,7 @@ void transpile(const char* input_filename, const char* output_filename) {
             break;
         }
     }
-
+    
     // Write the necessary includes at the top of the file
     for (int i = 0; i < include_count; i++) {
         fprintf(output_file, "%s\n", includes[i]);
@@ -1218,126 +1259,189 @@ void transpile(const char* input_filename, const char* output_filename) {
             fprintf(output_file, "#include <stdio.h>\n");
         }
     }
-
+    
     if (needs_stdint) {
         int has = 0;
         for (int i = 0; i < include_count; i++)
             if (strstr(includes[i], "#include <stdint.h>") && !strstr(includes[i], "/*")) { has = 1; break; }
         if (!has) fprintf(output_file, "#include <stdint.h>\n");
     }
-
-
+    
+    
     if (prototype_count > 0 || uses_stdio || needs_stdint) {
         for (int i = 0; i < newlines_after_includes; i++) {
             fprintf(output_file, "\n");
         }
     }
-
+    
     // Write the prototypes at the top of the file
     for (int i = 0; i < prototype_count; i++) {
         fprintf(output_file, "%s\n", prototypes[i]);
     }
-
+    
     if (prototype_count > 0) {
         for (size_t i = 0; i < function_spacing; i++) {
             fprintf(output_file, "\n");
         }
     }
-
+    
     // Transpile the actual code
     fseek(input_file, 0, SEEK_SET);
     /* int in_main_function = 0; */
     /* int is_first_function = 1; */
     /* int scope_level = 0; */
-
+    
     while (fgets(line, sizeof(line), input_file)) {
+        char *trimmed_line = line;
         // Skip the commented "use" lines
         if (strstr(line, "use ")) {
             continue;
         }
-
+        
+        if (strstr(trimmed_line, "impl ") && strstr(trimmed_line, "{")) {
+            sscanf(trimmed_line, "impl %s", current_impl_type);
+            char *brace = strchr(current_impl_type, '{');
+            if (brace) *brace = '\0';
+            in_impl_block = 1;
+            continue;
+        }
+        
+        // Check if we're exiting an impl block (closing brace at scope 0)
+        if (in_impl_block && strstr(trimmed_line, "}") && !in_function) {
+            current_impl_type[0] = '\0';
+            in_impl_block = 0;
+            continue;
+        }
+        
         if (strstr(line, "defer ")) {
             // Capture the action following the 'defer' keyword
             char *action = strchr(line, ' ') + 1;
             push_defer_statement(action);
             continue; // Skip writing the defer line to the output
         }
-
+        
         // Handle type definitions
         if (strstr(line, "type ")) {
             handleType(input_file, output_file, line);
             continue;
         }
-
+        
         // Check for function definition
         if (strstr(line, "fn ") && strstr(line, "{")) {
             char function_name[MAX_LINE_LENGTH];
             char parameters[MAX_LINE_LENGTH];
-            char return_type[MAX_LINE_LENGTH] = "void"; // NOTE for functions
-
+            char return_type[MAX_LINE_LENGTH] = "void";
+            
             // Parse function signature
-            sscanf(line, "fn %s", function_name);
+            /* sscanf(line, "fn %s", function_name); */
+            
+            // Parse function name - find "fn " then read until '('
+            char *fn_start = strstr(line, "fn ");
+            if (fn_start) {
+                fn_start += 3; // Skip "fn "
+                while (*fn_start == ' ' || *fn_start == '\t') fn_start++;
+                char *paren = strchr(fn_start, '(');
+                if (paren) {
+                    int name_len = paren - fn_start;
+                    strncpy(function_name, fn_start, name_len);
+                    function_name[name_len] = '\0';
+                }
+            }            
+            
             char *start_params = strchr(line, '(') + 1;
             char *end_params = strchr(line, ')');
             strncpy(parameters, start_params, end_params - start_params);
             parameters[end_params - start_params] = '\0';
-
+            
             // Check for return type
             char *return_type_pos = strstr(line, "->");
             if (return_type_pos != NULL) {
                 sscanf(return_type_pos, "-> %s", return_type);
                 strcpy(return_type, map_type(return_type));
             }
-
+            
             // Remove the "fn " prefix and the return type part
             strtok(function_name, "(");
-
+            
             // Translate parameters
             char translated_params[MAX_LINE_LENGTH] = "";
-            char *param = strtok(parameters, ",");
-            while (param != NULL) {
-                char param_name[MAX_LINE_LENGTH];
-                char param_type[MAX_LINE_LENGTH];
-                sscanf(param, "%[^:]:%s", param_name, param_type);
-                strcat(translated_params, map_type(param_type));
-                strcat(translated_params, " ");
-                strcat(translated_params, param_name);
-                param = strtok(NULL, ",");
-                if (param != NULL) {
+            
+            // NEW: If in impl block, add self parameter
+            if (strlen(current_impl_type) > 0) {
+                snprintf(translated_params, MAX_LINE_LENGTH, "%s* self", current_impl_type);
+                if (strlen(parameters) > 0 && parameters[0] != '\0') {
                     strcat(translated_params, ", ");
                 }
             }
-
+            
+            // Add remaining parameters
+            char *param = strtok(parameters, ",");
+            while (param != NULL) {
+                // Skip whitespace
+                while (*param == ' ' || *param == '\t') param++;
+                
+                if (strlen(param) > 0) {
+                    char param_name[MAX_LINE_LENGTH];
+                    char param_type[MAX_LINE_LENGTH];
+                    sscanf(param, "%[^:]:%s", param_name, param_type);
+                    
+                    strcat(translated_params, map_type(param_type));
+                    strcat(translated_params, " ");
+                    strcat(translated_params, param_name);
+                    
+                    param = strtok(NULL, ",");
+                    if (param != NULL) {
+                        strcat(translated_params, ", ");
+                    }
+                }
+            }
+            
+            // NEW: Create full function name (namespace it if in impl)
+            char full_function_name[MAX_LINE_LENGTH];
+            if (strlen(current_impl_type) > 0) {
+                // Convert type name to lowercase for the prefix
+                char lowercase_type[MAX_LINE_LENGTH];
+                strcpy(lowercase_type, current_impl_type);
+                for (int i = 0; lowercase_type[i]; i++) {
+                    lowercase_type[i] = tolower(lowercase_type[i]);
+                }
+                snprintf(full_function_name, MAX_LINE_LENGTH, "%s_%s", lowercase_type, function_name);
+            } else {
+                strcpy(full_function_name, function_name);
+            }
+            
             if (!is_first_function) {
                 for (size_t i = 0; i < function_spacing; i++) {
                     fprintf(output_file, "\n");
                 }
             }
             is_first_function = 0;
-
-            fprintf(output_file, "%s %s(%s) {\n", return_type, function_name, translated_params);
+            
+            // NEW: Use full_function_name instead of function_name
+            fprintf(output_file, "%s %s(%s) {\n", return_type, full_function_name, translated_params);
+            
             in_function = 1;
             scope_level = 1; // Reset scope level for a new function
-
+            
             // Check if this is the main function
             if (strcmp(function_name, "main") == 0) {
                 in_main_function = 1;
             }
             continue;
         }
-
-
+        
+        
         // Check for end of function or scope
         if (in_function && strstr(line, "}")) {
             // Calculate the correct indentation BEFORE any scope changes
             int current_indentation = (scope_level - 1) * indentation;
-    
+            
             // Execute defers for the scope that is closing (current scope_level)
             pop_and_execute_defers(output_file, scope_level);
-    
+            
             // Now decrement the scope level
             scope_level--;
-    
+            
             if (scope_level == 0) { 
                 // End of function - no indentation for function closing brace
                 fprintf(output_file, "}\n");
@@ -1352,7 +1456,7 @@ void transpile(const char* input_filename, const char* output_filename) {
             }
             continue;
         }
-
+        
         // Replace macros with their C equivalents
         if (strstr(line, "println!(")) {
             // Check if the line is commented
@@ -1361,7 +1465,7 @@ void transpile(const char* input_filename, const char* output_filename) {
                 trimmed_line++;
             }
             int is_commented = strstr(trimmed_line, "//") && (strstr(trimmed_line, "//") < strstr(trimmed_line, "println!("));
-
+            
             // Find the start and end of the macro content
             char* start_content = strchr(line, '(') + 1;
             char* end_content = strrchr(line, ')');
@@ -1369,13 +1473,13 @@ void transpile(const char* input_filename, const char* output_filename) {
                 char content[MAX_LINE_LENGTH];
                 strncpy(content, start_content, end_content - start_content);
                 content[end_content - start_content] = '\0';
-
+                
                 // Remove surrounding double quotes from content if present
                 if (content[0] == '"' && content[strlen(content) - 1] == '"') {
                     content[strlen(content) - 1] = '\0';
                     memmove(content, content + 1, strlen(content));
                 }
-
+                
                 // Write the translated printf statement, commented if necessary
                 print_indentation(output_file, scope_level * indentation);
                 if (is_commented) {
@@ -1385,19 +1489,19 @@ void transpile(const char* input_filename, const char* output_filename) {
             }
             continue;
         }
-
-
+        
+        
         // Transpile variable declarations
-        char *trimmed_line = line;
+        /* char *trimmed_line = line; */
         while (*trimmed_line == ' ' || *trimmed_line == '\t') {
             trimmed_line++;
         }
-
+        
         if (strstr(trimmed_line, "let ")) {
             parse_variable_declaration(line, output_file, in_function ? (trimmed_line - line) : 0);
             continue;
         }
-
+        
         // Transpile if statements
         if (strstr(trimmed_line, "if ")) {
             int is_commented = strstr(line, "//") != NULL;
@@ -1557,8 +1661,8 @@ void transpile(const char* input_filename, const char* output_filename) {
             scope_level++;
             continue;
         }
-
-
+        
+        
         // Scope-open detection for while/for/anonymous
         if (in_function) {
             // Detect 'while (...) {' on one line
@@ -1569,7 +1673,7 @@ void transpile(const char* input_filename, const char* output_filename) {
                 scope_level++; // <-- entering a new block
                 continue;
             }
-
+            
             // Detect 'for (...) {' on one line
             if (strstr(trimmed_line, "for") && strchr(trimmed_line, '{')) {
                 print_indentation(output_file, trimmed_line - line);
@@ -1577,7 +1681,7 @@ void transpile(const char* input_filename, const char* output_filename) {
                 scope_level++; // <-- entering a new block
                 continue;
             }
-
+            
             // Detect standalone '{' (anonymous block)
             {
                 const char *p = trimmed_line;
@@ -1590,7 +1694,7 @@ void transpile(const char* input_filename, const char* output_filename) {
                 }
             }
         }
-
+        
         // Handle defers before returns
         if (in_function) {
             // Skip commented lines (anything where '//' comes before 'return')
@@ -1604,18 +1708,17 @@ void transpile(const char* input_filename, const char* output_filename) {
                     if (starts_token) {
                         // 1) Emit all defers that are still pending at any open scope.
                         pop_all_defers(output_file);
-
+                        
                         // 2) Now print the 'return' line with its original indentation.
                         print_indentation(output_file, trimmed_line - line);
                         fprintf(output_file, "%s", trimmed_line);
-
+                        
                         // 3) Continue; we’ve handled this line.
                         continue;
                     }
                 }
             }
         }
-
         
         // Comments: preserve original indentation exactly
         {
@@ -1627,12 +1730,109 @@ void transpile(const char* input_filename, const char* output_filename) {
                 continue;
             }
         }
-
-
         
-        // Copy function body lines if inside any function
+        
+        // Rewrite method calls (.method() -> typename_method(&object)))
+        if (in_function && strchr(trimmed_line, '.') && strchr(trimmed_line, '(')) {
+            char *dot = strchr(trimmed_line, '.');
+            char *open_paren = strchr(dot, '(');
+            
+            // Make sure this looks like a method call
+            if (dot && open_paren && open_paren > dot) {
+                char rewritten[MAX_LINE_LENGTH];
+                
+                // Extract object name (before dot)
+                char obj_name[MAX_LINE_LENGTH];
+                const char *start = trimmed_line;
+                while (*start == ' ' || *start == '\t') start++;
+                int obj_len = dot - start;
+                strncpy(obj_name, start, obj_len);
+                obj_name[obj_len] = '\0';
+                
+                // Extract method name (between dot and paren)
+                char method_name[MAX_LINE_LENGTH];
+                int method_len = open_paren - (dot + 1);
+                strncpy(method_name, dot + 1, method_len);
+                method_name[method_len] = '\0';
+                
+                // Extract arguments (inside parens)
+                char *close_paren = strchr(open_paren, ')');
+                char args[MAX_LINE_LENGTH] = "";
+                if (close_paren) {
+                    int args_len = close_paren - (open_paren + 1);
+                    strncpy(args, open_paren + 1, args_len);
+                    args[args_len] = '\0';
+                }
+                
+                // Get rest of line after the call
+                char *rest = close_paren ? close_paren + 1 : "";
+                
+                // Infer type from object name (capitalize first letter)
+                char type_name[MAX_LINE_LENGTH];
+                strcpy(type_name, obj_name);
+                if (type_name[0] >= 'a' && type_name[0] <= 'z') {
+                    type_name[0] = type_name[0] - 'a' + 'A';
+                }
+                
+                // Convert to lowercase for function name prefix
+                char lowercase_type[MAX_LINE_LENGTH];
+                strcpy(lowercase_type, type_name);
+                for (int i = 0; lowercase_type[i]; i++) {
+                    lowercase_type[i] = tolower(lowercase_type[i]);
+                }
+                
+                // Output rewritten call
+                print_indentation(output_file, trimmed_line - line);
+                
+                // Trim whitespace from args
+                char *args_start = args;
+                while (*args_start == ' ' || *args_start == '\t') args_start++;
+                char *args_end = args_start + strlen(args_start) - 1;
+                while (args_end > args_start && (*args_end == ' ' || *args_end == '\t')) {
+                    *args_end = '\0';
+                    args_end--;
+                }
+                
+                if (strlen(args_start) > 0) {
+                    fprintf(output_file, "%s_%s(&%s, %s)%s\n", 
+                            lowercase_type, method_name, obj_name, args_start, rest);
+                } else {
+                    fprintf(output_file, "%s_%s(&%s)%s\n", 
+                            lowercase_type, method_name, obj_name, rest);
+                }
+                continue;
+            }
+        }
+        
+        // Replace self.member with self->member in impl methods
+        if (in_function && strlen(current_impl_type) > 0) {
+            if (strstr(trimmed_line, "self.")) {
+                char rewritten[MAX_LINE_LENGTH];
+                char *dst = rewritten;
+                char *src = trimmed_line;
+                
+                while (*src) {
+                    if (strncmp(src, "self.", 5) == 0) {
+                        strcpy(dst, "self->");
+                        dst += 6;
+                        src += 5;
+                    } else {
+                        *dst++ = *src++;
+                    }
+                }
+                *dst = '\0';
+                
+                print_indentation(output_file, trimmed_line - line);
+                fprintf(output_file, "%s", rewritten);
+                continue;
+            }
+        }        
+        
+        
+        // Copy body lines if inside any function
         if (in_function) {
-            print_indentation(output_file, trimmed_line - line);
+            /* print_indentation(output_file, trimmed_line - line); */
+            print_indentation(output_file, scope_level * indentation);
             fprintf(output_file, "%s", trimmed_line);
         } else {
             // Copy lines outside of any function without indentation
@@ -1669,7 +1869,7 @@ void jadeInit(const char *project_name) {
     snprintf(path, path_len, "%s/main.jade", project_name);
     FILE *file = fopen(path, "w");
     if (file != NULL) {
-        fprintf(file, "#include <stdio.h>\n");
+        fprintf(file, "#include <stdio.h>\n\n");
         fprintf(file, "fn main() -> i32 {\n    printf(\"Hello world\\n\");\n    return 0;\n}\n");
         fclose(file);
     }

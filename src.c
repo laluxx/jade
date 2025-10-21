@@ -1,20 +1,64 @@
 #include <raylib.h>
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
+#include <https://github/com/laluxx/eline/blob/main/eline/h.h>
 #include <stdio.h>
 
-int sub(int x, int  y);
+
+
+int sub(int x, int y);
 void voidFunction();
 bool boolFunction();
-int add(int x, int  y);
+int add(int x, int y);
 
-int sub(int x, int  y) {
+
+
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+
+void point_new(Point* self, int x, int y) {
+    printf("Hello, world\n");
+}
+
+
+void point_incX(Point* self, int n) {
+        self->x += n;
+    printf("Hello, world\n");
+    while (1) {
+        
+    }
+        return; // but not here
+}
+
+
+void point_incY(Point* self, int n) {
+        self->y += n; 
+}
+
+
+
+
+
+
+
+typedef struct Value {
+    bool b;
+    Value v;
+} Value;
+
+
+
+
+int sub(int x, int y) {
     return x - y;
 }
 
 
 void voidFunction() {
-
+    
 }
 
 
@@ -28,19 +72,6 @@ char* st = "ciao";
 
 
 #define COMPTIME 10;
-
-typedef struct {
-    int x;
-    int y;
-} Point;
-
-
-typedef struct Value {
-    bool b;
-    Value v;
-} Value;
-
-
 
 int integer = 29;
 float floating = 29.0;
@@ -72,23 +103,25 @@ int arrr[3] = {1, 2, 3}; // C syntax always works in every context!
 
 
 
-
-
 int main() {
     int variable = sub(2, 2); // NOTE This works somehow;
     int x = 10;
     int y = 3;
+    
+    Point point;
+    point_incY(&point, 10);
 
-
+    
+    
     if (x > 3) {
         printf("Hello World\n");
     }
-
+    
     if (x > 3) {
         printf("Hello World\n");
     }
-
-
+    
+    
     if (x > 3) printf("Hello World\n");
     if (x == y) printf("Hello World\n");
     if (x >= y) printf("Hello World\n");
@@ -97,29 +130,29 @@ int main() {
     if (x <= y) return 1;
     if (x > 3) printf("Hello World\n");
     if (boolFunction()) return 1;
-
-
+    
+    
     // TODO Those still don't work
     // while (true) printf("Yes\n");
     // while true printf("Yes\n");
     // while boolFunction() printf("No\n");
-
+    
     // for 10 printf("Hello, world\n");
     // for x printf("Hello, world\n");
-
+    
     while (1) {
         printf("something\n");
         break;
     }
-
+    
     
     sub(3, -1); // ANOTHER
     // Comment
-    printf("Deferredf!\n"); // TODO Defers pop before return statements
+    printf("Deferredf!\n"); // NOTE Defers pop before return statements
     return 0;
 }
 
 
-int add(int x, int  y) {
+int add(int x, int y) {
     return x + y;
 }
