@@ -1,8 +1,9 @@
 use raylib
 use GLFW.glfw3
 use stdbool
+use https://raw.githubusercontent.com/laluxx/eline/refs/heads/main/eline.h
+use github/laluxx/eline/eline.h
 
-use https://github.com/laluxx/eline/blob/main/eline.h
 
 type Point {
     x:i32
@@ -28,17 +29,10 @@ impl Point {
     }
 }
 
-
-
-
-
-
-
 rec type Value {
     b:bool
     v:Value
 }
-
 
 fn sub(x:i32, y:i32) -> i32 {
     return x - y;

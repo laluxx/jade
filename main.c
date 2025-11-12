@@ -761,6 +761,141 @@ void gather_prototypes(FILE *input_file, char prototypes[][MAX_LINE_LENGTH], int
     }
 }
 
+
+// Add these includes at the top of your file
+#include <curl/curl.h>
+#include <unistd.h>
+
+// Add this structure for libcurl response handling
+struct MemoryStruct {
+    char *memory;
+    size_t size;
+};
+
+// Callback function for libcurl to write data
+static size_t WriteMemoryCallback(void *contents, size_t size, size_t nmemb, void *userp) {
+    size_t realsize = size * nmemb;
+    struct MemoryStruct *mem = (struct MemoryStruct *)userp;
+    
+    char *ptr = realloc(mem->memory, mem->size + realsize + 1);
+    if(!ptr) {
+        fprintf(stderr, "Not enough memory (realloc returned NULL)\n");
+        return 0;
+    }
+    
+    mem->memory = ptr;
+    memcpy(&(mem->memory[mem->size]), contents, realsize);
+    mem->size += realsize;
+    mem->memory[mem->size] = 0;
+    
+    return realsize;
+}
+
+// Extract filename from URL
+char* extract_filename_from_url(const char* url) {
+    const char* last_slash = strrchr(url, '/');
+    if (last_slash && *(last_slash + 1)) {
+        return strdup(last_slash + 1);
+    }
+    return strdup("downloaded.h");
+}
+
+// Download file from URL
+int download_file(const char* url, const char* output_filename) {
+    CURL *curl;
+    CURLcode res;
+    struct MemoryStruct chunk;
+    
+    chunk.memory = malloc(1);
+    chunk.size = 0;
+    
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl = curl_easy_init();
+    
+    if(curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, url);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, "jade-compiler/1.0");
+        curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirects
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L); // For HTTPS (consider security implications)
+        
+        res = curl_easy_perform(curl);
+        
+        if(res != CURLE_OK) {
+            fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+            curl_easy_cleanup(curl);
+            free(chunk.memory);
+            curl_global_cleanup();
+            return 0;
+        }
+        
+        // Write to file
+        FILE *fp = fopen(output_filename, "wb");
+        if(fp) {
+            fwrite(chunk.memory, 1, chunk.size, fp);
+            fclose(fp);
+            printf("Downloaded: %s -> %s\n", url, output_filename);
+        } else {
+            fprintf(stderr, "Could not open file %s for writing\n", output_filename);
+            curl_easy_cleanup(curl);
+            free(chunk.memory);
+            curl_global_cleanup();
+            return 0;
+        }
+        
+        curl_easy_cleanup(curl);
+        free(chunk.memory);
+    }
+    
+    curl_global_cleanup();
+    return 1;
+}
+
+// Check if file exists
+int file_exists(const char* filename) {
+    return access(filename, F_OK) == 0;
+}
+
+// Convert GitHub shorthand to raw URL
+// github/user/repo/path/file.h -> https://raw.githubusercontent.com/user/repo/refs/heads/main/path/file.h
+char* github_to_raw_url(const char* github_path) {
+    static char url[MAX_LINE_LENGTH];
+    
+    // Skip "github/" prefix
+    const char* path = github_path + 7; // strlen("github/")
+    
+    // Parse: user/repo/path/to/file.h
+    char user[256], repo[256], filepath[MAX_LINE_LENGTH];
+    
+    // Find first slash (end of user)
+    const char* first_slash = strchr(path, '/');
+    if (!first_slash) return NULL;
+    
+    int user_len = first_slash - path;
+    strncpy(user, path, user_len);
+    user[user_len] = '\0';
+    
+    // Find second slash (end of repo)
+    const char* second_slash = strchr(first_slash + 1, '/');
+    if (!second_slash) return NULL;
+    
+    int repo_len = second_slash - (first_slash + 1);
+    strncpy(repo, first_slash + 1, repo_len);
+    repo[repo_len] = '\0';
+    
+    // Rest is the file path
+    strcpy(filepath, second_slash + 1);
+    
+    // Construct raw GitHub URL
+    snprintf(url, MAX_LINE_LENGTH, 
+            "https://raw.githubusercontent.com/%s/%s/refs/heads/main/%s",
+            user, repo, filepath);
+    
+    return url;
+}
+
+// Modify the gather_includes function to handle HTTP/HTTPS and GitHub shorthand
 void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *include_count, int *uses_stdio) {
     char line[MAX_LINE_LENGTH];
     fseek(input_file, 0, SEEK_SET);
@@ -771,6 +906,80 @@ void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *in
             
             sscanf(line, is_commented ? "// use %s" : "use %s", library);
             
+            // Check if it's a GitHub shorthand (github/user/repo/file.h)
+            if (strncmp(library, "github/", 7) == 0) {
+                char* raw_url = github_to_raw_url(library);
+                if (!raw_url) {
+                    fprintf(stderr, "Error: Invalid GitHub path format: %s\n", library);
+                    fprintf(stderr, "Expected format: github/user/repo/path/to/file.h\n");
+                    snprintf(includes[*include_count], MAX_LINE_LENGTH, 
+                            "/* Invalid GitHub path: %s */", library);
+                    (*include_count)++;
+                    continue;
+                }
+                
+                // Extract filename from the GitHub path (last component)
+                char* filename = extract_filename_from_url(library);
+                
+                // Download file if it doesn't exist
+                if (!file_exists(filename)) {
+                    printf("Downloading from GitHub: %s\n", library);
+                    printf("  -> %s\n", raw_url);
+                    if (!download_file(raw_url, filename)) {
+                        fprintf(stderr, "Warning: Failed to download from GitHub: %s\n", library);
+                        snprintf(includes[*include_count], MAX_LINE_LENGTH, 
+                                "/* Failed to download: %s */", library);
+                        (*include_count)++;
+                        free(filename);
+                        continue;
+                    }
+                } else {
+                    printf("Using cached file: %s (from %s)\n", filename, library);
+                }
+                
+                // Add local include with quotes
+                snprintf(includes[*include_count], MAX_LINE_LENGTH, 
+                        "%s#include \"%s\"", is_commented ? "/* " : "", filename);
+                if (is_commented) {
+                    strcat(includes[*include_count], " */");
+                }
+                (*include_count)++;
+                free(filename);
+                continue;
+            }
+            
+            // Check if it's an HTTP/HTTPS URL
+            if (strncmp(library, "http://", 7) == 0 || strncmp(library, "https://", 8) == 0) {
+                // Extract filename from URL
+                char* filename = extract_filename_from_url(library);
+                
+                // Download file if it doesn't exist
+                if (!file_exists(filename)) {
+                    printf("Downloading %s...\n", library);
+                    if (!download_file(library, filename)) {
+                        fprintf(stderr, "Warning: Failed to download %s\n", library);
+                        snprintf(includes[*include_count], MAX_LINE_LENGTH, 
+                                "/* Failed to download: %s */", library);
+                        (*include_count)++;
+                        free(filename);
+                        continue;
+                    }
+                } else {
+                    printf("Using cached file: %s\n", filename);
+                }
+                
+                // Add local include with quotes
+                snprintf(includes[*include_count], MAX_LINE_LENGTH, 
+                        "%s#include \"%s\"", is_commented ? "/* " : "", filename);
+                if (is_commented) {
+                    strcat(includes[*include_count], " */");
+                }
+                (*include_count)++;
+                free(filename);
+                continue;
+            }
+            
+            // Handle standard library includes (existing code)
             if (strcmp(library, "stdio") == 0) {
                 snprintf(includes[*include_count], MAX_LINE_LENGTH, "%s#include <stdio.h>", is_commented ? "/* " : "");
                 if (!is_commented) {
@@ -794,6 +1003,40 @@ void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *in
         }
     }
 }
+
+/* void gather_includes(FILE *input_file, char includes[][MAX_LINE_LENGTH], int *include_count, int *uses_stdio) { */
+/*     char line[MAX_LINE_LENGTH]; */
+/*     fseek(input_file, 0, SEEK_SET); */
+/*     while (fgets(line, sizeof(line), input_file)) { */
+/*         if (strstr(line, "use ")) { */
+/*             char library[MAX_LINE_LENGTH]; */
+/*             int is_commented = (strstr(line, "//") == line); */
+            
+/*             sscanf(line, is_commented ? "// use %s" : "use %s", library); */
+            
+/*             if (strcmp(library, "stdio") == 0) { */
+/*                 snprintf(includes[*include_count], MAX_LINE_LENGTH, "%s#include <stdio.h>", is_commented ? "/\* " : ""); */
+/*                 if (!is_commented) { */
+/*                     (*uses_stdio) = 1; */
+/*                 } */
+/*             } else if (strcmp(library, "stdlib") == 0) { */
+/*                 snprintf(includes[*include_count], MAX_LINE_LENGTH, "%s#include <stdlib.h>", is_commented ? "/\* " : ""); */
+/*             } else { */
+/*                 // Replace dots with slashes for libraries like GLFW.glfw3 */
+/*                 for (char *p = library; *p; p++) { */
+/*                     if (*p == '.') { */
+/*                         *p = '/'; */
+/*                     } */
+/*                 } */
+/*                 snprintf(includes[*include_count], MAX_LINE_LENGTH, "%s#include <%s.h>", is_commented ? "/\* " : "", library); */
+/*             } */
+/*             if (is_commented) { */
+/*                 strcat(includes[*include_count], " *\/"); */
+/*             } */
+/*             (*include_count)++; */
+/*         } */
+/*     } */
+/* } */
 
 void handle_loop(FILE *output_file, int indentation_level) {
     for (int i = 0; i < indentation_level; i++) {

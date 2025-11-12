@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -Wall -Wextra -g -lcurl
 TARGET = jade
 SRC = main.c
 PREFIX = /usr/local

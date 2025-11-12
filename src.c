@@ -1,7 +1,8 @@
 #include <raylib.h>
 #include <GLFW/glfw3.h>
 #include <stdbool.h>
-#include <https://github/com/laluxx/eline/blob/main/eline/h.h>
+#include "eline.h"
+#include "eline.h"
 #include <stdio.h>
 
 
@@ -38,17 +39,10 @@ void point_incY(Point* self, int n) {
         self->y += n; 
 }
 
-
-
-
-
-
-
 typedef struct Value {
     bool b;
     Value v;
 } Value;
-
 
 
 
